@@ -601,6 +601,14 @@
       <input type="range" id="p-cullS" min="0" max="1" step="0.002" value="1"></div>
     <div class="row"><label>Size × all</label><output id="o-scale">—</output>
       <input type="range" id="p-scale" min="0.05" max="3" step="0.01" value="1"></div>
+    <div class="row" title="Clamps the longest scale axis against the MIDDLE one. 60 is off. Needle-shaped gaussians streak radially across the frame; a legitimate splat is a flat disc (two similar axes, one tiny) so its max/mid is near 1 and it is untouched."><label>Anisotropy limit</label><output id="o-anisoLimit">—</output>
+      <input type="range" id="p-anisoLimit" min="1" max="60" step="0.5" value="60"></div>
+    <p style="color:var(--ink-dim); margin:8px 0 0">
+      Size and shape are independent failure modes — a needle can be small in volume and
+      still streak hundreds of pixels — so <strong>Anisotropy limit</strong> is not a
+      duplicate of <strong>Max splat size</strong>. It modifies geometry and costs real
+      detail; reach for the Optics section's <strong>Antialias floor</strong> first.
+    </p>
   </details>
 
   <details class="mod" data-group="region">
@@ -673,6 +681,21 @@
     <div class="row"><label>Aperture</label><output id="o-dofAperture">—</output>
       <input type="range" id="p-dofAperture" min="0" max="30" step="0.1" value="0"></div>
     <p style="color:var(--ink-dim); margin:8px 0 0">Gaussian bokeh only — no aperture shape, no cat's-eye, no shaped highlight discs. Those need a custom splat shader; out of scope here.</p>
+  </details>
+
+  <details class="mod" data-group="optics">
+    <summary>Optics <em>lens body</em><i class="gflag"></i></summary>
+    <p style="color:var(--ink-dim); margin:0 0 8px">Renderer-level properties, not per-splat modifiers — these apply to every gaussian on every frame whether or not depth of field is on.</p>
+    <div class="row" title="A constant term added to every splat's projected 2D covariance. Spark's own default is 0.3, and it is antialiasing: the energy correction that follows attenuates a sub-pixel-thin needle by ~75% against ~7% for a round splat. Lower it for maximum clarity, raise it if a capture still shows shards."><label>Antialias floor</label><output id="o-blurAmount">—</output>
+      <input type="range" id="p-blurAmount" min="0" max="1.5" step="0.01" value="0.3"></div>
+    <div class="row" title="Hard screen-space cap on a splat's drawn radius, in pixels. Diagnostic mainly: if dropping it to 100 kills shards instantly, that confirms the diagnosis. As a fix it truncates legitimately large near splats with a hard edge."><label>Max pixel radius</label><output id="o-maxPixelRadius">—</output>
+      <input type="range" id="p-maxPixelRadius" min="32" max="1024" step="8" value="512"></div>
+    <p style="color:var(--ink-dim); margin:8px 0 0">
+      <strong>0.3 is the figure for scenes trained <em>with</em> antialiasing</strong> — a
+      capture trained without it may want another value. This is per-capture, not a
+      constant. It is the first thing to reach for when a large capture shows radial
+      needle shards; the Opacity section's <strong>Anisotropy limit</strong> is the second.
+    </p>
   </details>
 
   <details class="mod" data-group="colour">
@@ -1014,18 +1037,25 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 1000);
 camera.position.set(0, 0, 3);
 
-/* blurAmount:0 — a real, unplanned finding from Phase 5's own investigation
-   (DEV_PLAN_EFFECTS.md), not a Phase 5 feature. SparkRenderer's own default
-   is blurAmount: 0.3 (undocumented in this app, never touched before now),
-   a constant circle-of-confusion-space term added to EVERY splat's
-   projected 2D covariance on EVERY frame, unconditionally — it has been
-   softening and dimming every render for the whole life of this file.
-   Measured impact on the loaded butterfly.spz: coverage 4.29 -> 4.17,
-   mean R 112.57 -> 115.21 with it zeroed. Small, but real and systematic,
-   and it directly contradicts every "baseline" measurement in NOTES
-   describing a clean, unblurred render. Explicit 0 here makes that true.
-   Depth of field (above) is the other intentional source of blur; smear
-   (below) is the third and last. */
+/* blurAmount is NOT set here — it is a SPEC parameter now (group `optics`),
+   written every frame by updateOptics() with a default of 0.3.
+
+   History, because the reversal matters. Phase 5 discovered SparkRenderer's
+   own default of 0.3 (a constant term added to every splat's projected 2D
+   covariance, unconditionally, on every frame) and pinned it to 0 for a
+   clean depth-of-field baseline. That was correct for measurement hygiene
+   and wrong as a shipped default: the term is ANTIALIASING. The energy
+   correction immediately below it in Spark's own shader attenuates by
+   sqrt(L1*L2 / ((L1+B)(L2+B))), and a sub-pixel-thin needle has L2 near
+   zero, so at B = 0.3 the denominator is dominated by B — roughly 75%
+   attenuation for a needle against 7% for a round splat. Zeroing it removed
+   the one thing suppressing primitives below the sampling limit. Invisible
+   on the 177k butterfly, very visible as radial shards on a 2M-splat
+   capture. See NOTES "The shard fix" for the measured re-baseline.
+
+   The standing lesson, now in NOTES: when a vendor default is neutralised
+   for measurement hygiene, record what that default was DOING, not merely
+   that it was changed. */
 
 /* Anisotropic smear (B1 of DEV_PLAN_EFFECTS.md's successor plan) — spike
    finding: Spark 2.1.0's SparkRenderer constructor is a genuine, first-
@@ -1079,7 +1109,6 @@ const SMEAR_VERTEX_SHADER = buildSmearVertexShader(_smearProbe.material.vertexSh
 
 const spark = new SparkRenderer({
   renderer,
-  blurAmount: 0,
   vertexShader: SMEAR_VERTEX_SHADER,
   extraUniforms: {
     smearAmt: { value: 0 },
@@ -1179,6 +1208,7 @@ const U = {
   cullA:   F(0),
   cullS:   F(9),
   sizeMul: F(1),
+  anisoLimit: F(60),
   dAmt:    F(0),
   dFrq:    F(2),
   dSpd:    F(0.3),
@@ -1304,6 +1334,15 @@ const negf = (a) => dyno.mul(a, dyno.dynoConst("float", -1));
 function rotFwd(v, rx, ry, rz) { return rotZ(rotY(rotX(v, rx), ry), rz); }
 function rotInv(v, rx, ry, rz) { return rotX(rotY(rotZ(v, negf(rz)), negf(ry)), negf(rx)); }
 
+/* The middle of a vec3's three components, by arithmetic rather than a sort:
+   mid = sum - max - min. Three dyno ops, no branches. */
+function midAxis(v) {
+  const x = dyno.swizzle(v, "x"), y = dyno.swizzle(v, "y"), z = dyno.swizzle(v, "z");
+  const mx = dyno.max(dyno.max(x, y), z);
+  const mn = dyno.min(dyno.min(x, y), z);
+  return dyno.sub(dyno.sub(dyno.add(dyno.add(x, y), z), mx), mn);
+}
+
 function buildModifier() {
   return dyno.dynoBlock({ gsplat: Gsplat }, { gsplat: Gsplat }, ({ gsplat }) => {
     const g = dyno.splitGsplat(gsplat).outputs;
@@ -1313,6 +1352,25 @@ function buildModifier() {
     let center = g.center;
     let scales = g.scales;
     const rgba0 = g.rgba;
+
+    /* --- anisotropy clamp (Phase A2 of DEV_PLAN_OPTICS_PORT.md) ---------
+       Large captures train a proportion of needle-shaped gaussians. Edge-on
+       they are invisible; aligned with the view they streak radially across
+       the frame out to maxPixelRadius. Clamp the longest scale axis against
+       the MIDDLE one, not the smallest: a legitimate splat is a flat disc
+       (two similar axes, one tiny), so its max/mid is near 1 and it is
+       untouched, where clamping against the smallest would flatten every
+       normal splat in the scene.
+
+       First thing in the graph, on the raw scales, so everything downstream
+       — Size × all, region shrink, and cullS's own max-axis test — sees the
+       clamped geometry rather than the needle. It is deliberately NOT a
+       substitute for cullS: size and shape are independent failure modes.
+       At the default 60 the cap sits far above any real max/mid ratio, so
+       min() selects the original scales unchanged — neutral by value, with
+       no branch and no recompile, the same discipline every other effect in
+       this graph follows. */
+    scales = dyno.min(scales, dyno.mul(ONE3, dyno.mul(midAxis(scales), U.anisoLimit)));
 
     /* ---------------------------------------------------------------- *
      * Regions — 4 slots, own dyno SDF per shape, evaluated unconditionally.
@@ -1671,7 +1729,7 @@ const SPEC = [
      running. */
   ["ease", 2, "camera"], ["dur", 2, "camera"],
   ["obTurns", 2, "camera"], ["obPhase", 3, "camera"], ["obElev", 3, "camera"], ["obDist", 2, "camera"],
-  ["cullA", 2, "trim"], ["cullS", 4, "trim"], ["scale", 2, "trim"],
+  ["cullA", 2, "trim"], ["cullS", 4, "trim"], ["scale", 2, "trim"], ["anisoLimit", 1, "trim"],
   ...REGION_SPEC,
   ["dAmt", 3, "displace"], ["dFrq", 2, "displace"],
   ["dSpd", 2, "displace"], ["dRnd", 2, "displace"],
@@ -1687,6 +1745,10 @@ const SPEC = [
      the whole section, which is what the collapsed title should report. */
   ["dofFocus", 2, "depth"], ["dofAperture", 1, "depth"],
   ["smearAmt", 1, "smear"], ["smearAngle", 0, "smear"],
+  /* Optics — SparkRenderer properties, not dyno uniforms. They ride the same
+     SPEC machinery (reset, envelopes, audio routing, presets) and are written
+     out by updateOptics() on the same per-frame path as dofFocus/smear. */
+  ["blurAmount", 2, "optics"], ["maxPixelRadius", 0, "optics"],
   ["bright", 2, "colour"],
   ["tR", 2, "colour"], ["tG", 2, "colour"], ["tB", 2, "colour"],
   ["sat", 2, "colour"],
@@ -2755,6 +2817,7 @@ function pushUniforms() {
   U.cullA.value   = V.cullA;
   U.cullS.value   = cullSize(V.cullS) * radius;
   U.sizeMul.value = V.scale;
+  U.anisoLimit.value = V.anisoLimit;
   U.dAmt.value    = V.dAmt * radius;
   U.dFrq.value    = V.dFrq / Math.max(radius, 1e-6);
   U.dSpd.value    = V.dSpd;
@@ -3272,6 +3335,22 @@ function updateSmear() {
   spark.material.uniforms.smearAngle.value = V.smearAngle;
 }
 
+/* Optics — plain SparkRenderer properties, same per-frame discipline and the
+   same reasoning as updateDofFocus()/updateSmear() above: Spark reads them
+   into its own uniforms as part of its normal per-frame sync, outside this
+   app's generate/bake pass, so no mesh.updateVersion() is needed and there
+   is no one-frame-lag hazard. V, not P, because both are animatable.
+
+   maxPixelRadius appears TWICE in Spark's vertex shader — as the ceiling on
+   the depth-of-field clamp AND as a hard cap on the drawn eigen-scales — so
+   lowering it truncates large near splats in screen space regardless of
+   whether DoF is on. That is why it is documented as a diagnostic rather
+   than the fix. */
+function updateOptics() {
+  spark.blurAmount = V.blurAmount;
+  spark.maxPixelRadius = V.maxPixelRadius;
+}
+
 function setCamMode(mode) {
   camMode = mode;
   for (const b of document.querySelectorAll("#camModeBtns button")) {
@@ -3427,6 +3506,7 @@ function frame(now) {
   pushCameraUniform();    // AFTER controls.update() — must see this frame's final camera pose, not last frame's
   updateDofFocus();
   updateSmear();
+  updateOptics();
   renderer.render(scene, camera);
 }
 
@@ -3599,6 +3679,7 @@ $("render").onclick = async () => {
       pushCameraUniform();   // AFTER driveCamera()/controls.update() — see the live loop's own note
       updateDofFocus();
       updateSmear();
+      updateOptics();
 
       /* Spark sorts splats asynchronously off a GPU readback, so a frame
          rendered straight after a camera move can blend in stale order.
@@ -4542,6 +4623,9 @@ if (new URLSearchParams(location.search).has("debug")) {
     pushCameraUniform,
     updateDofFocus,
     updateSmear,
+    updateOptics,
+    serialize,
+    applyPreset,
     get smearVertexShader(){ return SMEAR_VERTEX_SHADER; },
     spark,
     /* Every coverage figure in NOTES was measured against "void". Both probe
@@ -4560,6 +4644,7 @@ if (new URLSearchParams(location.search).has("debug")) {
       pushCameraUniform();
       updateDofFocus();
       updateSmear();
+      updateOptics();
       renderer.render(scene, camera);
       renderer.setClearColor(saved, 1);
     },
@@ -4574,6 +4659,7 @@ if (new URLSearchParams(location.search).has("debug")) {
         pushCameraUniform();
         updateDofFocus();
         updateSmear();
+        updateOptics();
         renderer.render(scene, camera);
         await spark.update({ scene, camera });
         renderer.render(scene, camera);

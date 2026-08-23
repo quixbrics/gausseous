@@ -2118,6 +2118,14 @@ with it zeroed — small, but real and systematic. Now explicit:
 `apertureAngle`) is the only intentional source of blur from here on;
 `preBlurAmount` is also left at its own default of 0.
 
+> **Superseded — see "Optics port, Phase A" below.** Pinning it to 0 was
+> right for measurement hygiene and wrong as a shipped default: the term is
+> antialiasing, and zeroing it produced radial needle shards on large
+> captures. `blurAmount` is now a `SPEC` parameter defaulting back to 0.3,
+> and the tables in this section were measured at 0. This section is left
+> intact because the *finding* — that a vendor default had been silently
+> active since the first commit — is still the important part.
+
 This does not retroactively invalidate any earlier measurement in this file
 — they are legitimate readings of the app's actual behaviour at the time,
 just under a default nobody had inspected. Future measurements will differ
@@ -2234,6 +2242,178 @@ Gaussian bokeh only. No aperture shape, no cat's-eye, no shaped highlight
 discs — those need a custom splat shader, and Spark 2.0 deprecated 0.1's
 arbitrary splat profiles, so it is the new shader path or nothing. Out of
 scope here, and out of scope for this app in general per its own Non-goals.
+
+---
+
+## Optics port, Phase A — the shard fix, and the re-baseline it forces
+
+`DEV_PLAN_OPTICS_PORT.md`, Phase A. Behaviour ported from the `Optics/optics.html`
+road-test rig; nothing copy-pasted from it, because it writes uniforms directly and
+reads raw slider values, both of which violate the invariants above. Re-expressed
+through `SPEC`, `V` and `pushUniforms()`.
+
+### `blurAmount` was set to 0 for a good reason and it was still the wrong default
+
+Phase 5 found SparkRenderer's undocumented `blurAmount: 0.3` default and pinned it
+to 0 for a clean depth-of-field baseline. Correct as measurement hygiene, wrong as
+a shipped default: **the term is antialiasing.** Reading Spark's own vertex shader,
+the energy correction immediately downstream attenuates by
+
+```
+blurAdjust = sqrt(detOrig / det) = sqrt(L1*L2 / ((L1+B)(L2+B)))
+```
+
+A sub-pixel-thin needle has `L2` near zero, so the denominator is dominated by `B`.
+Worked through at `B = 0.3`: a round splat of 2px sigma (`L1 = L2 = 4`) keeps
+`4/4.3 = 0.930` — **7.0% attenuation**. A needle 10px by 0.1px (`L1 = 100`,
+`L2 = 0.01`) keeps `sqrt(1 / (100.3 * 0.31)) = 0.179` — **82% attenuation.** That is
+antialiasing correctly suppressing a primitive below the sampling limit, and zeroing
+it removed the only thing doing so. Invisible on a 177k capture; radial needle
+shards on a 2M-splat one.
+
+`blurAmount` is now a `SPEC` parameter, group `optics`, **default 0.3**, written by
+`updateOptics()` on the same per-frame renderer-property path as
+`updateDofFocus()`/`updateSmear()`.
+
+**0.3 is the figure for scenes trained *with* antialiasing.** A capture trained
+without it may want another value. This is per-capture, not a constant — which is
+exactly why it is a slider and not a constant in the constructor.
+
+**The standing lesson, because it has now bitten twice: when a vendor default is
+neutralised for measurement hygiene, record what that default was *doing*, not
+merely that it was changed.** Zeroing `blurAmount` cost a day of shard hunting.
+
+### Re-baseline — the full `?debug=1` effect sweep, at both `blurAmount` values
+
+`3_3_2025.ply` (44,296 gaussians), canvas **940×568**, `void` background, every
+figure via `window.__bench.settled()` with a 6-render warm-up and the
+stable-AND-non-zero-on-a-real-background rule. Each case is set from a full
+reset-all, so no two effects are ever live at once.
+
+Coverage %, then mean R, then mean luma:
+
+| case | value | `blurAmount = 0` | `blurAmount = 0.3` |
+|---|---|---|---|
+| **base** | — | **3.0478** / 13.147 / 13.850 | **3.1763** / 13.250 / 13.962 |
+| `cullA` | 0.1 | 3.0469 / 13.145 / 13.848 | 3.1758 / 13.249 / 13.960 |
+| `sat` | 2 | 3.0535 / 13.316 / 13.902 | 3.1840 / 13.410 / 14.013 |
+| `dAmt` | 0.3 | 12.2794 / 21.435 / 22.367 | 12.8791 / 21.423 / 22.355 |
+| `qAmt` | 0.6 | 2.8042 / 11.023 / 11.839 | 2.9179 / 11.159 / 11.977 |
+| `dpAmt` | 0.8 | 2.8978 / 9.979 / 10.786 | 2.9808 / 9.974 / 10.782 |
+| `dofAperture` | 5 | 5.1427 / 14.148 / 15.135 | **5.1427 / 14.148 / 15.135** |
+| `smearAmt` | 8 | 4.0384 / 13.825 / 14.657 | 4.0585 / 13.835 / 14.668 |
+| `bright` | 1.4 | 3.0602 / 14.403 / 15.230 | 3.1979 / 14.531 / 15.371 |
+| `scale` | 1.6 | 3.6944 / 13.467 / 14.227 | 3.7215 / 13.550 / 14.314 |
+| `anisoLimit` | 8 | 3.0467 / 13.143 / 13.847 | 3.1744 / 13.245 / 13.957 |
+| `maxPixelRadius` | 100 | 3.0478 / 13.147 / 13.850 | 3.1763 / 13.250 / 13.962 |
+
+Every case restores to base **exactly** — coverage, R and luma all bit-identical
+after reset, at both `blurAmount` values.
+
+**The re-baseline in one number: `blurAmount` 0 → 0.3 moves base coverage
+`3.0478 → 3.1763`, +4.22%. Mean R +0.78%, mean luma +0.81%.** Multiply any older
+figure in this file measured on this capture by roughly 1.042 to compare, or
+compare ratios against each table's own base, which cancels this as well as canvas
+geometry.
+
+Luma goes **up**, not down, and that is not a contradiction of "blur attenuates".
+Per-primitive energy is conserved by `blurAdjust`; what changes is that the same
+energy is spread over more pixels, so fewer of them saturate or overlap. This is
+the same compositing-overlap effect Phase 5 recorded — summed displayed luma is not
+a proxy for per-primitive energy on a dense cloud.
+
+### Two measured facts worth keeping
+
+**`dofAperture = 5` is bit-identical at `blurAmount` 0 and 0.3** — 5.1427 / 14.148 /
+15.135 both times, to every digit. Spark's own line is
+`fullBlurAmount = clamp(sqr(focusRadius), blurAmount, sqr(maxPixelRadius))`, so
+`blurAmount` is only a **floor**, and at aperture 5 the circle of confusion exceeds
+it on every visible splat. The antialias floor and depth of field do not stack;
+whichever is larger wins, per splat.
+
+**`maxPixelRadius = 100` is bit-identical to 512 on this capture**, at both
+`blurAmount` values. No splat here draws wider than a 100px radius, so the control
+does literally nothing on a well-behaved 44k capture. Exposed anyway, as the plan
+asks, for its diagnostic value: if dropping it to 100 kills shards on a large
+capture, that confirms the diagnosis. As a *fix* it is worse than either of the
+other two, because it clips in screen space and truncates legitimately large near
+splats with a hard edge. It is also read twice in Spark's shader — once as the DoF
+clamp ceiling, once as a cap on the drawn eigen-scales — so it bites whether or not
+depth of field is on.
+
+### `anisoLimit` — the second line, in Trim beside `cullS`
+
+An `objectModifier` clamping the longest scale axis against the **middle** one,
+first thing in `buildModifier()` on the raw scales, so `Size × all`, region shrink
+and `cullS`'s own max-axis test all see the clamped geometry:
+
+```
+mid = sx + sy + sz - max - min          // midAxis(), three dyno ops, no branches
+scales = min(scales, vec3(mid * limit))
+```
+
+Against the **middle** axis, not the smallest. A legitimate splat is a flat disc —
+two similar axes, one tiny — so its `max/mid` is near 1 and it is untouched.
+Clamping against the smallest would flatten every normal splat in the scene.
+
+Measured on the daffodil at `blurAmount = 0.3`:
+
+| `anisoLimit` | 60 (default) | 30 | 16 | 8 | 4 | 2 | 1 |
+|---|---|---|---|---|---|---|---|
+| coverage | 3.1763 | 3.1763 | 3.1763 | 3.1744 | 3.1604 | 3.1271 | 3.0842 |
+| Δ vs default | — | 0 | 0 | −0.06% | −0.50% | −1.55% | −2.90% |
+
+**60, 30 and 16 are bit-identical** — direct evidence the clamp is a genuine no-op
+above any real `max/mid` ratio in a clean capture, neutral by *value* with no branch
+and no recompile, the same discipline every other effect in this graph follows. At 8
+the plan's acceptance bound (within 1% on a well-behaved capture) is met with two
+orders of magnitude to spare: −0.06%. At 1 the cap forces perfect isotropy and costs
+2.9% — that is the control working, not a defect.
+
+Size and shape are **independent failure modes** — a needle can be small in volume
+and still streak hundreds of pixels — so this is not a duplicate of `cullS`. Default
+off (60) on purpose: it modifies geometry and costs real detail, so it is the second
+reach, after `blurAmount`.
+
+`cullA` stays. Global opacity (Phase C) will not replace it either: the anisotropy
+clamp handles needles, `cullS` handles oversized blobs, and neither touches diffuse
+low-alpha haze, which is `cullA`'s one real job.
+
+### Frame time
+
+30- and 60-render averages at 44,296 splats, warm-up discarded, interleaved and
+repeated: `anisoLimit` 60 vs 8 — 0.147/0.117ms vs 0.178/0.075ms. `blurAmount` 0 vs
+0.3 — 0.063/0.045ms vs 0.047/0.045ms. **All within noise; no measurable cost either
+way.** The clamp is three dyno ops on a path Spark already bakes, and `blurAmount`
+is a uniform Spark already reads every frame.
+
+### Preset
+
+**No version bump.** All three are additive `SPEC` entries, so they inherit reset,
+envelopes, audio routing and persistence for free, and `applyPreset()`'s existing
+"missing fields keep their current value" rule handles a v5 file that predates them:
+it lands on the new defaults rather than being rejected. Verified: round-trip
+`serialize() -> applyPreset() -> serialize()` is byte-exact (modulo `saved`) with
+`blurAmount 0.62`, `maxPixelRadius 200`, `anisoLimit 12.5`; and a file with all
+three keys deleted loads without touching them.
+
+The honest consequence, recorded rather than smoothed over: **a preset authored
+before this commit will now render at `blurAmount = 0.3` where it was authored at
+0.** That is a real, small look change (+4.22% coverage on this capture) applied to
+old work. It is the right default and the plan re-baselines everything around it,
+but it is not a silent no-op.
+
+### Not verified, and why
+
+The plan's headline acceptance criterion — *"a large capture that showed shards
+shows none at `blurAmount = 0.3`"* — **is not verified here.** The committed test
+asset is a clean 44k Polycam capture with no needle population; on it, the whole
+shard mechanism is inert (`maxPixelRadius` at 100 changes nothing, `anisoLimit` at
+16 changes nothing). The mechanism is confirmed analytically from Spark's own shader
+arithmetic above, and the controls are confirmed to move the picture in the right
+direction and to be exactly neutral at their defaults. Confirming the *symptom* is
+gone needs a needle-heavy capture in the repo, which there is not one of. Recorded
+as an open item, not as a pass.
 
 ---
 
