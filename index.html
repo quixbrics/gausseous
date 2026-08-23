@@ -666,21 +666,27 @@
     <div class="row"><label>Far</label><output id="o-dpFar">—</output>
       <input type="range" id="p-dpFar" min="0" max="8" step="0.02" value="3"></div>
     <div class="subhead">Depth of field <em>lens blur</em></div>
-    <p style="color:var(--ink-dim); margin:0 0 8px">Spark's own per-splat circle-of-confusion blur — a defocused splat is exactly another (wider, dimmer) Gaussian, so this composites correctly through the existing sort with no special handling. No effect at Aperture 0.</p>
+    <p style="color:var(--ink-dim); margin:0 0 8px">Spark's own per-splat circle-of-confusion blur — a defocused splat is exactly another (wider, dimmer) Gaussian, so this composites correctly through the existing sort with no special handling. <strong>100 is exactly off</strong>, on the fast path, not an invisible blur still paying for itself.</p>
     <div class="btns" style="margin-bottom:9px">
-      <select id="dofFocusSrc" title="Manual: use the Focus slider below. Mask: track that slot's centre distance from the camera every frame, so moving or animating the mask pulls focus.">
-        <option value="manual" selected>Manual focus</option>
+      <select id="dofFocusSrc" title="Pivot: the camera-to-orbit-target distance, whatever you are actually looking at. Mask: that slot's centre distance from the camera, tracked every frame, so moving or animating the mask pulls focus. Focus below offsets whichever of the two is chosen.">
+        <option value="manual" selected>Focus on pivot</option>
         <option value="1">Focus-pull: Mask 1</option>
         <option value="2">Focus-pull: Mask 2</option>
         <option value="3">Focus-pull: Mask 3</option>
         <option value="4">Focus-pull: Mask 4</option>
       </select>
     </div>
-    <div class="row"><label>Focus</label><output id="o-dofFocus">—</output>
-      <input type="range" id="p-dofFocus" min="0" max="8" step="0.02" value="2"></div>
-    <div class="row"><label>Aperture</label><output id="o-dofAperture">—</output>
-      <input type="range" id="p-dofAperture" min="0" max="30" step="0.1" value="0"></div>
-    <p style="color:var(--ink-dim); margin:8px 0 0">Gaussian bokeh only — no aperture shape, no cat's-eye, no shaped highlight discs. Those need a custom splat shader; out of scope here.</p>
+    <div class="row" title="Depth of field, 0 = maximum blur, 100 = none. Deliberately not an f-number: Spark's apertureAngle is not calibrated to a physical aperture, so a real-lens label would be photographically meaningless."><label>Depth of field</label><output id="o-dof">—</output>
+      <input type="range" id="p-dof" min="0" max="100" step="0.5" value="100"></div>
+    <div class="row" title="Focus offset in stops (doublings) from the focus source above. 0 focuses exactly on it, +1 twice as far, -1 half as far. Scale-free, so the same slider position means the same thing on a tabletop scan and on a building."><label>Focus (stops)</label><output id="o-dofStops">—</output>
+      <input type="range" id="p-dofStops" min="-5" max="5" step="0.05" value="0"></div>
+    <p style="color:var(--ink-dim); margin:8px 0 0">
+      Focus is an <strong>offset in stops from the pivot</strong>, not an absolute
+      distance — the pivot describes what is being looked at, where scene radius
+      describes the whole scan and stops meaning nothing once you have dollied into a
+      detail. Gaussian bokeh only: no aperture shape, no cat's-eye, no shaped highlight
+      discs. Those need a custom splat shader; out of scope here.
+    </p>
   </details>
 
   <details class="mod" data-group="optics">
@@ -1175,7 +1181,18 @@ function showDpr() {
 }
 
 function resize() {
-  const w = stage.clientWidth, h = stage.clientHeight;
+  /* Floored at 1px, not used raw. A zero-height stage — a collapsed pane, a
+     display:none ancestor, a not-yet-laid-out first call — gives `0 / 0`,
+     which is NaN, and NaN aspect is not a transient cosmetic glitch: it
+     propagates into reframe()'s own `hFov = 2*atan(tan(vFov/2) * aspect)`,
+     through Math.min(vFov, NaN) and sin(NaN) into `dist`, and lands as a NaN
+     camera.position that renders an empty frame FOREVER — nothing downstream
+     ever recomputes it, because reframe() only runs on load, Reframe and
+     transform commits. Found while measuring the optics port: a probe run
+     with the pane collapsed produced a blank viewport and a valid-looking
+     controls.target (set before the NaN line), which reads like a Spark
+     failure rather than an aspect-ratio one. */
+  const w = Math.max(stage.clientWidth, 1), h = Math.max(stage.clientHeight, 1);
   renderer.setPixelRatio(effDpr());
   renderer.setSize(w, h, false);
   renderer.domElement.style.width = w + "px";
@@ -1743,7 +1760,7 @@ const SPEC = [
   /* Depth fade and depth of field share one "Depth" section in the rail, so
      they share one group id — refreshGroups()'s driven/dirty flag then counts
      the whole section, which is what the collapsed title should report. */
-  ["dofFocus", 2, "depth"], ["dofAperture", 1, "depth"],
+  ["dof", 1, "depth"], ["dofStops", 2, "depth"],
   ["smearAmt", 1, "smear"], ["smearAngle", 0, "smear"],
   /* Optics — SparkRenderer properties, not dyno uniforms. They ride the same
      SPEC machinery (reset, envelopes, audio routing, presets) and are written
@@ -1802,11 +1819,59 @@ buildRegionRows();
 const CULL_MIN = 0.0002, CULL_MAX = 0.1;
 const cullSize = (u) => CULL_MIN * Math.pow(CULL_MAX / CULL_MIN, u);
 
+/* Depth of field, 0 = maximum blur, 100 = none. Deliberately NOT an f-number.
+   That was tried in the rig and rejected: tan(theta) = 1/(2N) is the correct
+   real-lens relation, but Spark's apertureAngle is not calibrated to a
+   physical aperture, so f/20 produced a depth of field no large-format lens
+   could. A false label is worse than an abstract one.
+
+   The 2.5 exponent puts fine control in the shallow-blur band that actually
+   gets used; a linear map spent most of its travel on blur so heavy the
+   subject was unreadable.
+
+   **100 must resolve to EXACTLY zero.** Spark gates its entire defocus path on
+   `apertureAngle > 0.0`; any nonzero angle enlarges every splat and pays full
+   overdraw however invisible the blur is. The 1e-4 snap exists for the same
+   reason — imperceptible blur at full cost is the worst trade available. */
+const DOF_MAX_ANGLE = 40 * (Math.PI / 180);
+function dofToAngle(dof) {
+  if (dof >= 100) return 0;
+  const a = DOF_MAX_ANGLE * Math.pow(1 - dof / 100, 2.5);
+  return a < 1e-4 ? 0 : a;
+}
+/* Inverse, for the v5 -> v6 preset migration only. */
+const angleToDof = (rad) =>
+  Math.min(100, Math.max(0, 100 * (1 - Math.pow(Math.max(rad, 0) / DOF_MAX_ANGLE, 1 / 2.5))));
+
 /* Readout override for parameters whose slider position is not the value.
    Takes the value explicitly so the same formatter serves both the manual
    slider value and an envelope-driven one. */
-const SHOW = { cullS: (v) => cullSize(v).toFixed(4) };
+const SHOW = {
+  cullS: (v) => cullSize(v).toFixed(4),
+  /* Signed, because "focus 0" means "exactly on the pivot" and the sign is
+     the whole content of the control — an unsigned 0.00 reads as "off". */
+  dofStops: (v) => (v > 0 ? "+" : "") + v.toFixed(2),
+};
 const readout = (id, digits, v) => SHOW[id] ? SHOW[id](v) : v.toFixed(digits);
+
+/* Digits per SPEC id, so anything that needs to write a parameter out of band
+   (the preset migrations, mainly) can render its readout the same way the
+   normal slider path does rather than guessing a precision. */
+const DIGITS = Object.fromEntries(SPEC.map(([id, d]) => [id, d]));
+
+/* Write a parameter from code: clamp to the control's own range, keep the
+   slider, P and the readout in agreement, and mark it dirty. The same three
+   lines applyPreset()'s own SPEC loop runs — factored out because the
+   migrations at its tail need exactly this and getting one of the three
+   wrong is a silent desync between what is displayed and what renders. */
+function setParam(id, v) {
+  const el = $("p-" + id);
+  el.value = Math.min(parseFloat(el.max), Math.max(parseFloat(el.min), v));
+  P[id] = parseFloat(el.value);
+  $("o-" + id).textContent = readout(id, DIGITS[id], P[id]);
+  markDirty(id);
+  return P[id];
+}
 
 /* Snapped defaults, captured before any listener can fire. A slider whose
    `value` attribute is not on its own min/step grid gets silently rounded by
@@ -3303,18 +3368,38 @@ function updateDofFocus() {
      other parameter. Reading P here would silently ignore a Focus envelope
      or a region-position envelope: the slider's raw value, not what the
      timeline is actually driving. */
-  spark.apertureAngle = V.dofAperture * (Math.PI / 180);
+  spark.apertureAngle = dofToAngle(V.dof);
+
+  /* Focus is an OFFSET IN STOPS from a base distance, not an absolute
+     distance in units of scene radius. That was the old control and it was
+     correctly normalised and still unusable: radius describes the whole
+     scan, so after dollying into a detail of a large capture the whole
+     useful band collapses into a sliver of the travel. This is the
+     "normalisation is necessary but not sufficient" rule from NOTES for the
+     third time — see cullS and mdScale for the other two.
+
+     The base is the camera-to-PIVOT distance: `controls.target` is what the
+     view is actually built around, so focusing on it is the photographer's
+     default and 0 stops is a genuinely useful value rather than an
+     arbitrary one. Focus-pull substitutes the mask's own view-axis depth as
+     the base, so the stops offset composes with it rather than replacing
+     it — racking away from a tracked subject stays possible. */
+  let base;
   const src = $("dofFocusSrc").value;
   if (src === "manual" || !mesh) {
-    spark.focalDistance = V.dofFocus * radius;
-    return;
+    base = camera.position.distanceTo(controls.target);
+  } else {
+    const n = src;
+    const localPos = new THREE.Vector3(V[`rg${n}X`] * radius, V[`rg${n}Y`] * radius, V[`rg${n}Z`] * radius);
+    const worldPos = mesh.localToWorld(localPos);
+    const camForward = camera.getWorldDirection(new THREE.Vector3());
+    base = worldPos.sub(camera.position).dot(camForward);
   }
-  const n = src;
-  const localPos = new THREE.Vector3(V[`rg${n}X`] * radius, V[`rg${n}Y`] * radius, V[`rg${n}Z`] * radius);
-  const worldPos = mesh.localToWorld(localPos);
-  const camForward = camera.getWorldDirection(new THREE.Vector3());
-  const toRegion = worldPos.sub(camera.position);
-  spark.focalDistance = Math.max(toRegion.dot(camForward), 0);
+  /* Clamped positive, not merely non-negative: focalDistance == 0 is one of
+     the two conditions Spark gates its whole defocus path on, so letting the
+     base reach zero (a mask that has passed behind the camera) would silently
+     switch depth of field OFF rather than focusing very close. */
+  spark.focalDistance = Math.max(base * Math.pow(2, V.dofStops), 1e-4);
 }
 
 /* Anisotropic smear — same per-frame-property discipline as updateDofFocus()
@@ -3755,7 +3840,7 @@ $("render").onclick = async () => {
    follow. */
 const PRESET_FORMAT = "gausseous-preset";
 const PRESET_FORMAT_LEGACY = "splat-bench-preset";
-const PRESET_VERSION = 5;   // v2 selects; v3 audio; v4 regions+mask; v5 camera keyframes
+const PRESET_VERSION = 6;   // v2 selects; v3 audio; v4 regions+mask; v5 camera keyframes; v6 depth of field re-expressed
 /* `mobileMode` is deliberately absent: it is a property of the device you are
    sitting at, not of the look. A preset saved on a desktop must not force a
    phone back to full pixel ratio, nor the reverse. */
@@ -4086,6 +4171,41 @@ function applyPreset(o) {
   applyXform();
   refreshModelUI();
   reframe();
+
+  /* --- v5 -> v6 migration: depth of field re-expressed -------------------
+     `dofAperture` (degrees, 0..30) became `dof` (0..100, inverted, shaped),
+     and `dofFocus` (absolute, in units of scene radius) became `dofStops`
+     (an offset in doublings from the pivot distance). Both old ids are gone
+     from SPEC, so the per-SPEC-id loop above skipped them as "unknown" —
+     detect the old shape explicitly and migrate rather than lose it.
+
+     Deliberately placed HERE, at the tail, and not up with the other params:
+     the focus migration needs the FINAL camera pose and orbit pivot, which
+     only exist after the camera block, applyXform() and reframe() above have
+     all run. Migrating it earlier would divide by a stale pivot distance.
+
+     The aperture half is exact — angleToDof() is the algebraic inverse of
+     dofToAngle(). The focus half is NOT, and the status line says so rather
+     than silently landing somewhere odd: the old value was anchored to scene
+     radius and the new one to a pivot that moves, so the same number cannot
+     mean the same thing under every camera. It reproduces the old focal
+     distance for the pose the preset actually restores, which is the useful
+     guarantee and the only one available. */
+  {
+    const oldAp = o.params?.dofAperture, oldFoc = o.params?.dofFocus;
+    if (Number.isFinite(oldAp)) {
+      setParam("dof", angleToDof(oldAp * (Math.PI / 180)));
+      applyPreset.migrationNotes.push(`aperture ${oldAp}° -> depth of field ${P.dof.toFixed(1)}`);
+    }
+    if (Number.isFinite(oldFoc)) {
+      const pivot = camera.position.distanceTo(controls.target);
+      const oldDist = oldFoc * radius;
+      if (pivot > 1e-6 && oldDist > 1e-6) {
+        setParam("dofStops", Math.log2(oldDist / pivot));
+        applyPreset.migrationNotes.push(`focus ${oldFoc}×radius -> ${P.dofStops >= 0 ? "+" : ""}${P.dofStops.toFixed(2)} stops (approximate — the pivot moves)`);
+      }
+    }
+  }
 
   pushUniforms();
   syncSliders();

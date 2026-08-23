@@ -2417,6 +2417,256 @@ as an open item, not as a pass.
 
 ---
 
+## Optics port, Phase B — depth of field controls
+
+`DEV_PLAN_OPTICS_PORT.md`, Phase B. Replaces `dofAperture` (degrees) and
+`dofFocus` (absolute, in units of scene radius) with `dof` (0–100) and
+`dofStops` (an offset in doublings from the pivot). Breaking for presets, hence
+`PRESET_VERSION` 6 and a migration.
+
+### `dof` is 0–100 and deliberately not an f-number
+
+An f-number was tried in the rig and rejected. `tan(theta) = 1/(2N)` is the
+correct real-lens relation, but Spark's `apertureAngle` is not calibrated to a
+physical aperture, so f/20 produced a depth of field no large-format lens could.
+**A false label is worse than an abstract one.**
+
+```
+angle = 40° * pow(1 - dof/100, 2.5)
+if (angle < 1e-4 rad) angle = 0
+```
+
+The 2.5 exponent puts fine control in the shallow-blur band that actually gets
+used. Measured, `dof` to aperture angle in degrees:
+
+| `dof` | 0 | 10 | 25 | 50 | 75 | 90 | 95 | 96 | 97 | **97.5** | 100 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| angle° | 40 | 30.737 | 19.486 | 7.071 | 1.250 | 0.1265 | 0.0224 | 0.0128 | 0.0062 | **0** | **0** |
+
+**100 resolves to exactly zero, and so does everything from 97.5 up.** Spark
+gates its entire defocus path on `apertureAngle > 0.0`; any nonzero angle
+enlarges every splat and pays full overdraw however invisible the blur is. The
+`1e-4` snap exists for that reason, and the measured snap point is between
+`dof` 97 and 97.5.
+
+**A measured detail the plan did not anticipate, and it argues the snap is if
+anything too conservative:** `dof` 90 and 95 are **bit-identical to `dof` 100**
+in coverage, R and luma (3.1763 / 13.250 / 13.962 at all three) — yet 90 and 95
+are *not* on the fast path. At those angles the circle of confusion is smaller
+than `blurAmount` everywhere on this capture, so Spark's own
+`clamp(sqr(focusRadius), blurAmount, …)` returns `blurAmount` and the frame is
+unchanged while the defocus branch still runs on every splat. That is precisely
+the "imperceptible blur at full cost" trade the plan calls the worst available,
+and it is live between roughly `dof` 90 and 97.5. The snap errs in the safe
+direction — it never removes blur that was visible — so it is left where the
+plan put it, but the gap is real and now recorded rather than assumed away.
+
+### Frame time is the wrong instrument here; the gate condition is the right one
+
+The plan asks for `dof = 100` to "measure the same frame time as the DoF path
+never running". At 44,296 splats the entire render is ~0.05ms, so the
+measurement has no power: `dof` 100 / 96 / 50, interleaved, warm-up discarded,
+came back 0.097/0.050, 0.063/0.073, 0.072/0.045 ms — pure noise, in which
+`dof = 50` is nominally the *fastest*. Reporting that as a pass would be
+reporting noise.
+
+The check that actually holds is structural and exact: **`spark.apertureAngle`
+is `=== 0`**, verified directly, and `apertureAngle > 0.0` is Spark's own gate
+condition read straight out of its vertex shader. The path cannot run. That is
+a stronger statement than a timing that agrees within noise, not a weaker one.
+A frame-time comparison would only become the real check on a capture large
+enough for overdraw to dominate, which the committed test asset is not.
+
+### Focus as an offset in stops from the pivot
+
+```
+fd = max(base * pow(2, dofStops), 1e-4)     // base = camera-to-pivot distance
+```
+
+Anchored to the **camera-to-pivot distance**, not to scene radius. Radius
+describes the whole scan; pivot distance describes what is being looked at.
+This is the "normalisation is necessary but not sufficient" rule from this file
+for the **third** time — `cullS` and `mdScale` were the first two — and the old
+control is a textbook case: it was correctly multiplied by `radius` and still
+unusable.
+
+Measured, and this is the acceptance criterion in its strongest form. Dollying
+the camera across a **160× range** of pivot distance and reading
+`spark.focalDistance / pivot` at each of five stop positions:
+
+| pivot distance | 0.6938 | 2.7753 | 11.1012 | 111.0122 |
+|---|---|---|---|---|
+| `dofStops` −2 | 0.25 | 0.25 | 0.25 | 0.25 |
+| −1 | 0.5 | 0.5 | 0.5 | 0.5 |
+| 0 | 1 | 1 | 1 | 1 |
+| +1 | 2 | 2 | 2 | 2 |
+| +2 | 4 | 4 | 4 | 4 |
+
+**Exact to nine decimal places at every cell** — `fd/pivot = 2^stops`,
+independent of scale by construction. Comparing two captures by eye was the
+plan's proposed test; this is the same claim measured, on one capture, without
+the eye.
+
+What the old control did at the far end, for the record: `radius` is 1.0663, so
+`dofFocus`'s whole 0–8 travel reached a maximum focal distance of **8.53** — at
+a pivot 111 units away, the entire slider focused in front of the subject and no
+position on it could reach the thing being looked at. The new control's 0 lands
+on it exactly.
+
+`focalDistance` is clamped to `1e-4`, not to 0. Zero is the *other* condition
+Spark gates the defocus path on, so letting the base reach zero — a focus-pull
+mask that has passed behind the camera — would silently switch depth of field
+off rather than focusing very close.
+
+### Focus-pull composes with the offset rather than replacing it
+
+`dofFocusSrc` keeps its five options; what changes is that Manual now means
+"the pivot" and the mask options supply a different **base** for the same stops
+offset, so racking away from a tracked subject stays possible. Verified against
+an independent CPU reference (mask 1 at `(0.3, 0.1, 0) × radius`, projected onto
+the camera's view axis, times `2^stops`) — agreement **exact to 1e-6** at −1, 0
+and +1 stops: 1.363238 / 2.726477 / 5.452953 against 1.363238 / 2.726477 /
+5.452953.
+
+### `V`, not `P` — re-verified, because this is where it bit last time
+
+Phase 5 shipped a bug where `updateDofFocus()` read `P` and every depth-of-field
+envelope sat frozen. Re-verified after the rewrite with envelopes armed on both
+new parameters (`dof` 100→20, `dofStops` −2→+2) while both sliders stayed at
+their defaults:
+
+| playhead | 0 | 0.25 | 0.5 | 0.75 | 1 |
+|---|---|---|---|---|---|
+| `P.dof` | 100 | 100 | 100 | 100 | 100 |
+| `V.dof` | 100 | 87.5 | 60 | 32.5 | 20 |
+| angle° | 0 | 0.221 | 4.048 | 14.973 | 22.897 |
+| `V.dofStops` | −2 | −1.375 | 0 | +1.375 | +2 |
+| `focalDistance` | 0.6938 | 1.0700 | 2.7753 | 7.1983 | 11.1012 |
+
+`P` never moves, the render tracks the curve, and `focalDistance` is
+`pivot × 2^stops` at every row.
+
+### Sweeps, and one behaviour worth knowing about
+
+`3_3_2025.ply`, 940×568, void, `blurAmount = 0.3`, base 3.1763 / 13.250 /
+13.962. Restores exactly after both sweeps.
+
+| `dof` | 100 | 97.5 | 95 | 90 | 75 | 50 | 25 | 0 |
+|---|---|---|---|---|---|---|---|---|
+| coverage | 3.1763 | 3.1763 | 3.1763 | 3.1763 | 3.2310 | 4.2428 | 5.8928 | 6.7396 |
+| mean R | 13.250 | 13.250 | 13.250 | 13.250 | 13.291 | 13.802 | 13.750 | 12.363 |
+
+`dofStops` at `dof = 50`:
+
+| stops | −2 | −1 | −0.5 | 0 | +0.5 | +1 | +2 |
+|---|---|---|---|---|---|---|---|
+| coverage | 6.6716 | 7.0617 | 6.2215 | 4.2428 | 6.4289 | 5.3023 | **0** |
+| mean R | 10.477 | 12.361 | 13.862 | 13.802 | 12.585 | 8.922 | **8** |
+
+Two things to read out of that, neither of them a defect:
+
+**Coverage is not a sharpness signal** — already recorded in Phase 5 and visible
+again here as a non-monotonic curve either side of focus. A defocused splat
+covers *more* pixels while being dimmer. Minimum coverage at 0 stops is the
+in-focus reading, but the curve on each side is not usable as a focus metric.
+
+**At extreme defocus the model erases rather than blurs.** `+2` stops reads
+coverage 0 and mean R 8 — pure background, the subject entirely gone. That is
+Spark's own `minAlpha` discard: `blurAdjust` shrinks peak alpha as the CoC
+grows, and past `0.5/255` the splat is discarded in the vertex shader rather
+than shaded. Physically a lens would smear the subject across the frame; this
+dissolves it. Worth knowing before reaching for heavy defocus, and it is the
+same discard mechanism Phase C's global opacity will exploit deliberately.
+
+### Preset — v5 → v6
+
+Both old ids are gone from `SPEC`, so `applyPreset()`'s per-id loop skips them
+as unknown. The migration is explicit, and it is placed at the **tail** of
+`applyPreset()`, after the camera block, `applyXform()` and `reframe()` — the
+focus half divides by the pivot distance, which does not exist until the final
+camera pose does. Migrating it up with the other parameters would divide by a
+stale pivot.
+
+- `dofAperture` (degrees) → `dof` via `angleToDof()`, the algebraic inverse of
+  `dofToAngle()`. **Verified exact**: round-tripping `dof` 0→100 in steps of 2.5
+  through both functions has a maximum error of **1.4e-14**.
+- `dofFocus` (× radius) → `log2(dofFocus * radius / pivot)`.
+
+Measured on a synthetic v5 file with `dofAperture: 5`, `dofFocus: 2`:
+
+| | old | migrated | deviation |
+|---|---|---|---|
+| aperture (rad) | 0.087266 | 0.087129 | 0.16% |
+| focal distance | 2.132535 | 2.103288 | 1.37% |
+
+**Neither formula is the source of that deviation — the slider step grid is.**
+Exact `dof` is 56.4675 and the control's step is 0.5, so it lands on 56.5;
+exact `dofStops` is −0.3800 and its step is 0.05, so it lands on −0.40. The
+bound is half a step either way: ≤0.25 in `dof` and ≤0.025 stops, the latter
+being ≤1.75% in focal distance. Left as is — that is finer than the control can
+usefully be dialled by hand, and quantising to a representable slider position
+is the right behaviour for a migration, not a rounding bug.
+
+Both migrations report themselves in the status line rather than landing
+silently:
+
+```
+aperture 5° -> depth of field 56.5
+focus 2×radius -> -0.40 stops (approximate — the pivot moves)
+```
+
+The focus note says "approximate" because it is, and for a reason no amount of
+arithmetic fixes: the old value was anchored to scene radius and the new one to
+a pivot that moves, so the same number cannot mean the same thing under every
+camera. What the migration does guarantee is that it reproduces the old focal
+distance **for the pose the preset itself restores**, which is the useful
+guarantee and the only one available.
+
+v6 round-trip `serialize() -> applyPreset() -> serialize()` is byte-exact
+(modulo `saved`).
+
+### `setParam()`
+
+The migrations need to write a parameter from code, which means keeping the
+slider, `P`, the readout and the dirty flag in agreement — the same four things
+`applyPreset()`'s own `SPEC` loop does inline. Factored out as `setParam(id, v)`
+rather than repeated, because getting one of the four wrong is a silent desync
+between what the panel displays and what renders. `DIGITS` (a `SPEC`-derived
+id→precision map) exists for the same reason: so out-of-band writes format
+their readout the same way the normal slider path does instead of guessing.
+
+### Deferred to Phase C, on purpose
+
+`nearBoost` (B3 in the plan) is a *shader* parameter — it multiplies `focusBlur`
+inside Spark's vertex shader — and its anchor is the same `focusBlur` line
+Phase C's field curvature and tilt patch. The plan asks Phase C to extend
+`buildSmearVertexShader()` into a single `buildSplatVertexShader()` patching all
+four anchors at once; landing a partial patch here and rewriting it there would
+mean two shader edits and two chances to get the anchor discipline wrong. The
+slider ships with C.
+
+### An unrelated latent bug found while setting up the measurements
+
+**`resize()` produced a NaN camera whenever the stage had zero height, and
+nothing ever recovered.** `camera.aspect = w / h` with `h === 0` is NaN;
+`reframe()` then computes `hFov = 2*atan(tan(vFov/2) * aspect)`, `Math.min(vFov,
+NaN)` is NaN, `Math.sin(NaN)` is NaN, and `dist` is NaN — so
+`camera.position.copy(center).add(0, 0, NaN)` lands a NaN position that renders
+an empty frame **permanently**, because `reframe()` only runs on load, on
+Reframe and on a transform commit.
+
+It presents deceptively: `controls.target` is set on the line *before* the NaN
+one, so the target is perfectly valid and only the position is broken, which
+reads like a Spark sort or generate failure rather than an aspect-ratio one. Hit
+live by loading the capture with the browser pane collapsed.
+
+Fixed by flooring both dimensions at 1px in `resize()`. Not in the plan, fixed
+anyway: every remaining phase of this port is verified by pixel probe, and a
+latent "the whole viewport is silently blank" path is not something to leave
+sitting under a measurement programme.
+
+---
+
 ## Section accordion and `SPEC` groups
 
 `SPEC` entries are `[id, digits, group]`. The group ties a parameter to its rail
