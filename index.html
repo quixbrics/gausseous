@@ -601,6 +601,8 @@
       <input type="range" id="p-cullS" min="0" max="1" step="0.002" value="1"></div>
     <div class="row"><label>Size × all</label><output id="o-scale">—</output>
       <input type="range" id="p-scale" min="0.05" max="3" step="0.01" value="1"></div>
+    <div class="row" title="A peak-alpha multiply on every splat, applied in the vertex shader before Spark's own minimum-alpha discard — so low opacity is a performance gain, not a cost. NOT uniform transparency: splats composite alpha-over, so dense regions stay solid while thin ones fade first and the model erodes edges-inward."><label>Opacity × all</label><output id="o-splatOpacity">—</output>
+      <input type="range" id="p-splatOpacity" min="-6" max="0.58" step="0.02" value="0"></div>
     <div class="row" title="Clamps the longest scale axis against the MIDDLE one. 60 is off. Needle-shaped gaussians streak radially across the frame; a legitimate splat is a flat disc (two similar axes, one tiny) so its max/mid is near 1 and it is untouched."><label>Anisotropy limit</label><output id="o-anisoLimit">—</output>
       <input type="range" id="p-anisoLimit" min="1" max="60" step="0.5" value="60"></div>
     <p style="color:var(--ink-dim); margin:8px 0 0">
@@ -608,6 +610,16 @@
       still streak hundreds of pixels — so <strong>Anisotropy limit</strong> is not a
       duplicate of <strong>Max splat size</strong>. It modifies geometry and costs real
       detail; reach for the Optics section's <strong>Antialias floor</strong> first.
+    </p>
+    <p style="color:var(--ink-dim); margin:8px 0 0">
+      <strong>Opacity × all</strong> is a peak-alpha multiply applied before Spark's own
+      minimum-alpha discard, so it both dims the model and thins it — but measured on a
+      44k capture the dimming dominates by a long way: at ×0.25 the brightest pixels are
+      down 93% while the lit area is down only 3%. Expect a fade, with a secondary
+      erosion at the edges. Above 1× is not "more": Spark's fragment shader gives alpha
+      over 1 a different, sharper-topped falloff, so it reads as harder-edged discs. It
+      does not replace <strong>Min opacity</strong>, which is the only one of these that
+      touches diffuse low-alpha haze.
     </p>
   </details>
 
@@ -680,6 +692,8 @@
       <input type="range" id="p-dof" min="0" max="100" step="0.5" value="100"></div>
     <div class="row" title="Focus offset in stops (doublings) from the focus source above. 0 focuses exactly on it, +1 twice as far, -1 half as far. Scale-free, so the same slider position means the same thing on a tabletop scan and on a building."><label>Focus (stops)</label><output id="o-dofStops">—</output>
       <input type="range" id="p-dofStops" min="-5" max="5" step="0.05" value="0"></div>
+    <div class="row" title="Multiplies blur on the camera side of the focal surface only. Deliberately non-physical: blur scales with the absolute depth error, and between the camera and the focal surface there is only F of depth to be wrong by, where behind it there is unlimited depth — so the far side goes fully soft and the near side cannot. 1 is off."><label>Near blur boost</label><output id="o-nearBoost">—</output>
+      <input type="range" id="p-nearBoost" min="1" max="8" step="0.05" value="1"></div>
     <p style="color:var(--ink-dim); margin:8px 0 0">
       Focus is an <strong>offset in stops from the pivot</strong>, not an absolute
       distance — the pivot describes what is being looked at, where scene radius
@@ -696,6 +710,20 @@
       <input type="range" id="p-blurAmount" min="0" max="1.5" step="0.01" value="0.3"></div>
     <div class="row" title="Hard screen-space cap on a splat's drawn radius, in pixels. Diagnostic mainly: if dropping it to 100 kills shards instantly, that confirms the diagnosis. As a fix it truncates legitimately large near splats with a hard edge."><label>Max pixel radius</label><output id="o-maxPixelRadius">—</output>
       <input type="range" id="p-maxPixelRadius" min="32" max="1024" step="8" value="512"></div>
+    <div class="subhead">Focal surface <em>scheimpflug + curvature</em></div>
+    <p style="color:var(--ink-dim); margin:0 0 8px">Bends and tips the surface that is in focus. All three do nothing at Depth of field 100, because there is no blur for them to shape.</p>
+    <div class="row" title="Bows the focal surface toward or away from the camera at the frame edges — positive pushes the corners further away, negative pulls them nearer. Real lenses do this whether you want them to or not."><label>Field curvature</label><output id="o-fieldCurve">—</output>
+      <input type="range" id="p-fieldCurve" min="-2" max="2" step="0.01" value="0"></div>
+    <div class="row" title="Tips the focal surface about the horizontal axis, like a view camera's front standard. Stored as a tangent: the shader wants a depth gradient per unit of view-space offset."><label>Tilt</label><output id="o-planeTilt">—</output>
+      <input type="range" id="p-planeTilt" min="-75" max="75" step="0.5" value="0"></div>
+    <div class="row" title="The same, about the vertical axis."><label>Swing</label><output id="o-planeSwing">—</output>
+      <input type="range" id="p-planeSwing" min="-75" max="75" step="0.5" value="0"></div>
+    <div class="subhead">Swirl <em>tangential defocus</em></div>
+    <p style="color:var(--ink-dim); margin:0 0 8px">Stretches defocused splats tangentially around the frame centre — the petzval / swirly-bokeh look. Coupled to the amount of defocus, so an in-focus subject stays clean and only the surround swirls. Nothing happens at Depth of field 100.</p>
+    <div class="row" title="Magnitude, in the same px^2 units as the projected covariance. Coupled to the local defocus amount, so this is a multiplier on blur that already exists, not blur of its own."><label>Swirl</label><output id="o-swirlAmt">—</output>
+      <input type="range" id="p-swirlAmt" min="0" max="30" step="0.1" value="0"></div>
+    <div class="row" title="How sharply swirl ramps from the frame centre to the corners. 0 is uniform across the frame; higher confines it to the edges."><label>Swirl falloff</label><output id="o-swirlFalloff">—</output>
+      <input type="range" id="p-swirlFalloff" min="0" max="5" step="0.05" value="2"></div>
     <p style="color:var(--ink-dim); margin:8px 0 0">
       <strong>0.3 is the figure for scenes trained <em>with</em> antialiasing</strong> — a
       capture trained without it may want another value. This is per-capture, not a
@@ -1063,62 +1091,177 @@ camera.position.set(0, 0, 3);
    for measurement hygiene, record what that default was DOING, not merely
    that it was changed. */
 
-/* Anisotropic smear (B1 of DEV_PLAN_EFFECTS.md's successor plan) — spike
-   finding: Spark 2.1.0's SparkRenderer constructor is a genuine, first-
-   class hook (`options.vertexShader`, `options.extraUniforms`), NOT
-   something requiring a private/undocumented workaround — but it IS whole-
-   file string replacement, not a template with injection points (the
+/* Spark vertex-shader patch — anisotropic smear (B1 of DEV_PLAN_EFFECTS.md's
+   successor plan) plus the four-anchor optics extension (Phase C of
+   DEV_PLAN_OPTICS_PORT.md).
+
+   Spike finding, still the governing constraint: Spark 2.1.0's SparkRenderer
+   constructor is a genuine, first-class hook (`options.vertexShader`,
+   `options.extraUniforms`), NOT a private/undocumented workaround — but it IS
+   whole-file string replacement, not a template with injection points (the
    compute shaders elsewhere in spark.module.js use `{{ GLOBALS }}` /
-   `{{ STATEMENTS }}` placeholders; `splatVertex_default` has none). That
-   pins this feature to the exact text of Spark 2.1.0's vertex shader — see
-   NOTES "Anisotropic smear" for why this is recorded as a real upgrade
-   hazard, not a footnote.
+   `{{ STATEMENTS }}` placeholders; `splatVertex_default` has none). That pins
+   this feature to the exact text of Spark 2.1.0's vertex shader — see NOTES
+   "Anisotropic smear" for why this is recorded as a real upgrade hazard, not a
+   footnote.
 
    The base shader text is read at RUNTIME from a throwaway probe
-   SparkRenderer's own `material.vertexShader` — never hand-transcribed
-   into this file — so this is self-verifying against whichever exact
+   SparkRenderer's own `material.vertexShader` — never hand-transcribed into
+   this file — so this is self-verifying against whichever exact
    spark.module.js build is actually loaded: if a future version renames or
-   restructures the two anchor lines below, `buildSmearVertexShader` throws
-   immediately at boot instead of silently compiling a shader that does not
-   do what this file thinks it does. */
-function buildSmearVertexShader(base) {
-  const uniformAnchor = "uniform float apertureAngle;";
-  const logicAnchor = "float detOrig = a * d - b * b;";
-  if (base.indexOf(uniformAnchor) === -1 || base.indexOf(logicAnchor) === -1) {
-    throw new Error(
-      "Anisotropic smear: Spark's vertex shader no longer contains the expected anchor text — " +
-      "spark.module.js version drift. See NOTES 'Anisotropic smear' before touching this.",
-    );
+   restructures any of the four anchor lines below, this THROWS AT BOOT
+   instead of silently compiling a shader that does not do what this file
+   thinks it does. Verified by deliberately corrupting each anchor in turn.
+
+   All four patches live in ONE function on purpose. Landing them across
+   several builders would mean several chances to get the anchor discipline
+   wrong, and the two covariance patches (smear, swirl) MUST share the single
+   det/blurAdjust energy correction that already exists below them. */
+const SHADER_ANCHORS = {
+  uniform:   "uniform float apertureAngle;",
+  focusBlur: "float focusBlur = abs((-viewCenter.z - focalDistance) / viewCenter.z);",
+  detOrig:   "float detOrig = a * d - b * b;",
+  alpha:     "rgba.a *= blurAdjust;",
+};
+
+function buildSplatVertexShader(base) {
+  for (const [name, anchor] of Object.entries(SHADER_ANCHORS)) {
+    if (base.indexOf(anchor) === -1) {
+      throw new Error(
+        `Splat vertex shader: Spark no longer contains the expected '${name}' anchor text — ` +
+        "spark.module.js version drift. See NOTES 'Anisotropic smear' and 'Optics port, " +
+        "Phase C' before touching this.",
+      );
+    }
   }
   return base
-    .replace(uniformAnchor, `${uniformAnchor}\nuniform float smearAmt;\nuniform float smearAngle;`)
-    /* Composition with DoF, per the plan: detOrig is computed ONCE, from the
-       covariance before either intentional-blur term; smear's anisotropic
-       term is added to a/b/d alongside DoF's isotropic fullBlurAmount,
-       BEFORE the single det/blurAdjust computation that already exists
-       immediately below this anchor — so one energy correction covers both
-       effects together, never two corrections compounding into extra
-       darkening. Gated on smearAmt > 0.0 exactly as DoF gates on
-       apertureAngle > 0.0, so 0 is the shader's own no-op branch, not an
-       approximately-zero blur term. */
-    .replace(logicAnchor, `${logicAnchor}
+    .replace(SHADER_ANCHORS.uniform, `${SHADER_ANCHORS.uniform}
+uniform float smearAmt;
+uniform float smearAngle;
+uniform float swirlAmt;
+uniform float swirlFalloff;
+uniform float fieldCurve;
+uniform float planeTilt;
+uniform float planeSwing;
+uniform float nearBoost;
+uniform float splatOpacity;`)
+
+    /* --- focal SURFACE, replacing the focal PLANE ------------------------
+       Scheimpflug plus field curvature. The focal surface is no longer normal
+       to the optical axis: its depth varies quadratically with distance from
+       the frame centre (curvature) and linearly with view-space x and y
+       (swing and tilt), which is exactly what swinging and tilting a view
+       camera's front standard does.
+
+       Curvature is applied FIRST so the curved surface tilts with the
+       standard, rather than the tilt being applied to a flat plane that is
+       then bent. fcDist is clamped positive because at strong tilt the plane
+       legitimately passes behind the camera on one side — correct behaviour,
+       not an error state.
+
+       nearBoost multiplies focusBlur on the camera side only. Deliberately
+       non-physical, and the asymmetry it exists to break is correct optics
+       rather than a bug: relative blur scales with the ABSOLUTE depth error
+       |d - F|, and between the camera and the focal plane there is only F of
+       depth to be wrong by, where behind it there is unlimited depth. So the
+       far side goes fully soft and the near side cannot. Default 1. */
+    .replace(SHADER_ANCHORS.focusBlur, `float fcR = length(clipCenter.xy / clipCenter.w);
+            float fcDist = focalDistance * (1.0 + fieldCurve * fcR * fcR);
+            fcDist += planeSwing * viewCenter.x + planeTilt * viewCenter.y;
+            fcDist = max(fcDist, 1e-4);
+            float focusBlur = abs((-viewCenter.z - fcDist) / viewCenter.z);
+            if (-viewCenter.z < fcDist) focusBlur *= nearBoost;`)
+
+    /* --- smear and swirl, both into the projected 2D covariance ----------
+       Composition, per the plan: detOrig is computed ONCE, from the
+       covariance before any intentional-blur term; smear's fixed-direction
+       and swirl's tangential outer products are added to a/b/d alongside
+       DoF's isotropic fullBlurAmount, BEFORE the single det/blurAdjust
+       computation immediately below this anchor. So ONE energy correction
+       covers all three together — never two or three corrections compounding
+       into extra darkening. There must remain exactly one.
+
+       Swirl's magnitude is tied to the DEFOCUS component of the blur —
+       `fullBlurAmount - blurAmount`, not fullBlurAmount itself — and that
+       subtraction is the whole correctness of the effect, not a detail. It is
+       what makes swirl read as a LENS rather than a warp: an in-focus subject
+       stays clean and only the defocused surround smears tangentially, so
+       swirl at zero aperture does nothing at all.
+
+       The plan specified `fullBlurAmount`, which was right when it was
+       written and became wrong two phases later. `fullBlurAmount` starts at
+       the antialias floor `blurAmount`, which Phase 5 had pinned to 0 and
+       Phase A restored to 0.3 — so coupling to it applies a constant swirl to
+       every splat in the scene, in focus or not, scaling with the antialias
+       setting. Measured before the fix: at blurAmount 0 swirl was bit-
+       identical with DoF off (the plan's own criterion, passing); at 0.3 it
+       moved coverage 3.1763 -> 3.2417 and at 1.0, 3.3484 -> 3.4588. Spark's
+       own clamp guarantees fullBlurAmount >= blurAmount, so the difference is
+       the defocus contribution alone and is never negative.
+
+       Both are gated on `> 0.0` exactly as DoF gates on apertureAngle, so 0
+       is the shader's own no-op branch, not an approximately-zero blur. */
+    .replace(SHADER_ANCHORS.detOrig, `${SHADER_ANCHORS.detOrig}
     if (smearAmt > 0.0) {
         float smearRad = radians(smearAngle);
         vec2 smearDir = vec2(cos(smearRad), sin(smearRad));
         a += smearAmt * smearDir.x * smearDir.x;
         b += smearAmt * smearDir.x * smearDir.y;
         d += smearAmt * smearDir.y * smearDir.y;
-    }`);
+    }
+    float swirlBlur = fullBlurAmount - blurAmount;
+    if (swirlAmt > 0.0 && swirlBlur > 0.0) {
+        vec2 sPix = (clipCenter.xy / clipCenter.w) * scaledRenderSize * 0.5;
+        float sR = length(sPix) / max(1e-3, 0.5 * length(scaledRenderSize));
+        if (sR > 1e-4) {
+            vec2 rad = normalize(sPix);
+            vec2 tang = vec2(-rad.y, rad.x);
+            float k = swirlAmt * swirlBlur * pow(min(sR, 2.0), swirlFalloff);
+            a += k * tang.x * tang.x;
+            b += k * tang.x * tang.y;
+            d += k * tang.y * tang.y;
+        }
+    }`)
+
+    /* --- global splat opacity --------------------------------------------
+       A UNIFORM, not an objectModifier. Alpha is written here in the vertex
+       shader, so a uniform costs nothing, where a modifier change would call
+       updateVersion() and re-bake the entire packed buffer on every frame of
+       a slider drag — the difference between smooth and stuttering at 2M
+       splats.
+
+       Placed BEFORE Spark's own minAlpha test, deliberately: splats falling
+       under 0.5/255 are then discarded rather than shaded, so low opacity can
+       be a performance gain rather than a cost. Not measurable at 44k splats
+       — frame time is flat from x1.5 down to x0.03 — but the discard is there
+       structurally and should show on a capture large enough to be fill-rate
+       bound.
+
+       What this is NOT, measured rather than assumed: the plan expected the
+       model to erode edges-inward while dense regions stayed solid. It does
+       erode, but the fade dominates. At x0.25 the count of pixels above luma
+       200 falls 93% while the total lit pixel count falls 3%; the BRIGHTEST
+       band empties first, not last. "Dense regions stay solid" needs alpha-
+       over to saturate, which wants far more overlap than this capture has —
+       plausible on a 2M-splat scan, untested. See NOTES. */
+    .replace(SHADER_ANCHORS.alpha, "rgba.a *= blurAdjust * splatOpacity;");
 }
-const _smearProbe = new SparkRenderer({ renderer });
-const SMEAR_VERTEX_SHADER = buildSmearVertexShader(_smearProbe.material.vertexShader);
+const _shaderProbe = new SparkRenderer({ renderer });
+const SPLAT_VERTEX_SHADER = buildSplatVertexShader(_shaderProbe.material.vertexShader);
 
 const spark = new SparkRenderer({
   renderer,
-  vertexShader: SMEAR_VERTEX_SHADER,
+  vertexShader: SPLAT_VERTEX_SHADER,
   extraUniforms: {
     smearAmt: { value: 0 },
     smearAngle: { value: 0 },
+    swirlAmt: { value: 0 },
+    swirlFalloff: { value: 2 },
+    fieldCurve: { value: 0 },
+    planeTilt: { value: 0 },
+    planeSwing: { value: 0 },
+    nearBoost: { value: 1 },
+    splatOpacity: { value: 1 },
   },
 });
 scene.add(spark);
@@ -1746,7 +1889,7 @@ const SPEC = [
      running. */
   ["ease", 2, "camera"], ["dur", 2, "camera"],
   ["obTurns", 2, "camera"], ["obPhase", 3, "camera"], ["obElev", 3, "camera"], ["obDist", 2, "camera"],
-  ["cullA", 2, "trim"], ["cullS", 4, "trim"], ["scale", 2, "trim"], ["anisoLimit", 1, "trim"],
+  ["cullA", 2, "trim"], ["cullS", 4, "trim"], ["scale", 2, "trim"], ["anisoLimit", 1, "trim"], ["splatOpacity", 2, "trim"],
   ...REGION_SPEC,
   ["dAmt", 3, "displace"], ["dFrq", 2, "displace"],
   ["dSpd", 2, "displace"], ["dRnd", 2, "displace"],
@@ -1760,12 +1903,14 @@ const SPEC = [
   /* Depth fade and depth of field share one "Depth" section in the rail, so
      they share one group id — refreshGroups()'s driven/dirty flag then counts
      the whole section, which is what the collapsed title should report. */
-  ["dof", 1, "depth"], ["dofStops", 2, "depth"],
+  ["dof", 1, "depth"], ["dofStops", 2, "depth"], ["nearBoost", 2, "depth"],
   ["smearAmt", 1, "smear"], ["smearAngle", 0, "smear"],
   /* Optics — SparkRenderer properties, not dyno uniforms. They ride the same
      SPEC machinery (reset, envelopes, audio routing, presets) and are written
      out by updateOptics() on the same per-frame path as dofFocus/smear. */
   ["blurAmount", 2, "optics"], ["maxPixelRadius", 0, "optics"],
+  ["swirlAmt", 1, "optics"], ["swirlFalloff", 2, "optics"],
+  ["fieldCurve", 2, "optics"], ["planeTilt", 1, "optics"], ["planeSwing", 1, "optics"],
   ["bright", 2, "colour"],
   ["tR", 2, "colour"], ["tG", 2, "colour"], ["tB", 2, "colour"],
   ["sat", 2, "colour"],
@@ -1851,6 +1996,12 @@ const SHOW = {
   /* Signed, because "focus 0" means "exactly on the pivot" and the sign is
      the whole content of the control — an unsigned 0.00 reads as "off". */
   dofStops: (v) => (v > 0 ? "+" : "") + v.toFixed(2),
+  /* The slider carries log2 of the multiplier, so the readout has to convert
+     back or the panel reports a number that appears nowhere in the render.
+     Same "the slider position is not the value" case as cullS, and the same
+     reason: the useful band spans two orders of magnitude and sits well below
+     1, which a linear control puts entirely in the bottom of its travel. */
+  splatOpacity: (v) => { const m = Math.pow(2, v); return (m < 0.1 ? m.toFixed(3) : m.toFixed(2)) + "×"; },
 };
 const readout = (id, digits, v) => SHOW[id] ? SHOW[id](v) : v.toFixed(digits);
 
@@ -3402,26 +3553,43 @@ function updateDofFocus() {
   spark.focalDistance = Math.max(base * Math.pow(2, V.dofStops), 1e-4);
 }
 
-/* Anisotropic smear — same per-frame-property discipline as updateDofFocus()
-   just above, and for the same reason: smearAmt/smearAngle can be envelope-
-   or audio-driven, so V (not P) has to be read fresh regardless of whether
-   pushUniforms() ran this exact frame. Unlike U.* uniforms elsewhere in this
-   file, spark.material.uniforms.* are NOT part of the generate/bake pass
-   Spark gates on `viewChanged || version changed` — THREE re-uploads a
-   ShaderMaterial's changed uniforms on every draw call regardless — so, like
-   dofFocus/dofAperture, this needs no mesh.updateVersion() and has no one-
-   frame-lag hazard of its own. smearAngle is passed in degrees, unconverted
-   — the shader's own `radians()` call does that, matching how dofAperture is
-   converted in JS instead only because Spark's OWN apertureAngle property
-   expects radians (a difference in the two uniforms' own external contracts,
-   not an inconsistency in this file). */
-function updateSmear() {
-  spark.material.uniforms.smearAmt.value = V.smearAmt;
-  spark.material.uniforms.smearAngle.value = V.smearAngle;
+/* Shader uniforms — same per-frame discipline as updateDofFocus() just above,
+   and for the same reason: every one of these can be envelope- or audio-driven,
+   so V (not P) has to be read fresh regardless of whether pushUniforms() ran
+   this exact frame. Unlike U.* uniforms elsewhere in this file,
+   spark.material.uniforms.* are NOT part of the generate/bake pass Spark gates
+   on `viewChanged || version changed` — THREE re-uploads a ShaderMaterial's
+   changed uniforms on every draw call regardless — so, like dof/dofStops, this
+   needs no mesh.updateVersion() and has no one-frame-lag hazard of its own.
+
+   smearAngle is passed in degrees, unconverted: the shader's own `radians()`
+   call does that. Tilt and swing are converted HERE, to TANGENTS, because the
+   shader wants a depth gradient per unit of view-space offset and tan(angle) is
+   exactly that quantity — a conversion, not a unit change. Clamped to ±75°,
+   short of the 90° where the tangent goes to infinity. splatOpacity is
+   converted here too, from the slider's log2 to the multiplier the shader
+   multiplies by. Which side of the boundary each conversion happens on follows
+   from each uniform's own external contract, not from a house style. */
+/* Above the function that uses it, not below — every `const` in this file
+   sits above its first reader by rule, after a TDZ throw took out the whole
+   module once. See NOTES "Fixed". */
+const clampDeg75 = (d) => Math.min(75, Math.max(-75, d));
+
+function updateShaderUniforms() {
+  const u = spark.material.uniforms;
+  u.smearAmt.value     = V.smearAmt;
+  u.smearAngle.value   = V.smearAngle;
+  u.swirlAmt.value     = V.swirlAmt;
+  u.swirlFalloff.value = V.swirlFalloff;
+  u.fieldCurve.value   = V.fieldCurve;
+  u.planeTilt.value    = Math.tan(clampDeg75(V.planeTilt) * (Math.PI / 180));
+  u.planeSwing.value   = Math.tan(clampDeg75(V.planeSwing) * (Math.PI / 180));
+  u.nearBoost.value    = V.nearBoost;
+  u.splatOpacity.value = Math.pow(2, V.splatOpacity);
 }
 
 /* Optics — plain SparkRenderer properties, same per-frame discipline and the
-   same reasoning as updateDofFocus()/updateSmear() above: Spark reads them
+   same reasoning as updateDofFocus()/updateShaderUniforms() above: Spark reads them
    into its own uniforms as part of its normal per-frame sync, outside this
    app's generate/bake pass, so no mesh.updateVersion() is needed and there
    is no one-frame-lag hazard. V, not P, because both are animatable.
@@ -3590,7 +3758,7 @@ function frame(now) {
   controls.update();
   pushCameraUniform();    // AFTER controls.update() — must see this frame's final camera pose, not last frame's
   updateDofFocus();
-  updateSmear();
+  updateShaderUniforms();
   updateOptics();
   renderer.render(scene, camera);
 }
@@ -3763,7 +3931,7 @@ $("render").onclick = async () => {
       controls.update();
       pushCameraUniform();   // AFTER driveCamera()/controls.update() — see the live loop's own note
       updateDofFocus();
-      updateSmear();
+      updateShaderUniforms();
       updateOptics();
 
       /* Spark sorts splats asynchronously off a GPU readback, so a frame
@@ -4742,11 +4910,13 @@ if (new URLSearchParams(location.search).has("debug")) {
     get bgColor(){ return $("bgColor").value; },
     pushCameraUniform,
     updateDofFocus,
-    updateSmear,
+    updateShaderUniforms,
     updateOptics,
     serialize,
     applyPreset,
-    get smearVertexShader(){ return SMEAR_VERTEX_SHADER; },
+    get splatVertexShader(){ return SPLAT_VERTEX_SHADER; },
+    buildSplatVertexShader,
+    SHADER_ANCHORS,
     spark,
     /* Every coverage figure in NOTES was measured against "void". Both probe
        helpers below force it for their own duration regardless of what the
@@ -4763,7 +4933,7 @@ if (new URLSearchParams(location.search).has("debug")) {
       controls.update();
       pushCameraUniform();
       updateDofFocus();
-      updateSmear();
+      updateShaderUniforms();
       updateOptics();
       renderer.render(scene, camera);
       renderer.setClearColor(saved, 1);
@@ -4778,7 +4948,7 @@ if (new URLSearchParams(location.search).has("debug")) {
         controls.update();
         pushCameraUniform();
         updateDofFocus();
-        updateSmear();
+        updateShaderUniforms();
         updateOptics();
         renderer.render(scene, camera);
         await spark.update({ scene, camera });

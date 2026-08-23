@@ -2667,6 +2667,321 @@ sitting under a measurement programme.
 
 ---
 
+## Optics port, Phase C — shader patch extensions
+
+`DEV_PLAN_OPTICS_PORT.md`, Phase C. `buildSmearVertexShader()` becomes
+`buildSplatVertexShader()`, patching **four** anchors instead of two, in one
+function. Seven new uniforms across `optics`, `depth` and `trim`.
+
+| anchor | purpose |
+|---|---|
+| `uniform float apertureAngle;` | declare the new uniforms |
+| `float focusBlur = abs((-viewCenter.z - focalDistance) / viewCenter.z);` | field curvature, tilt, swing, near boost |
+| `float detOrig = a * d - b * b;` | smear (existing) + swirl |
+| `rgba.a *= blurAdjust;` | global splat opacity |
+
+All four in one builder on purpose. Landing them across several builders would
+mean several chances to get the anchor discipline wrong, and the two covariance
+patches **must** share the single `det`/`blurAdjust` energy correction that
+already exists below them.
+
+### Self-verification, exercised rather than asserted
+
+Base text is read at runtime from a throwaway probe `SparkRenderer`'s own
+`material.vertexShader`, never transcribed into `index.html`. Verified by
+**deliberately corrupting each anchor in turn** — all four throw at build with a
+message naming the specific anchor:
+
+```
+Splat vertex shader: Spark no longer contains the expected 'focusBlur' anchor
+text — spark.module.js version drift. …
+```
+
+Structural checks on the produced shader, all confirmed:
+
+- exactly **one** `float blurAdjust = sqrt(` in the patched source — the single
+  energy correction the plan requires,
+- `rgba.a *= blurAdjust * splatOpacity;` sits **before** Spark's `minAlpha`
+  test, so sub-threshold splats are discarded rather than shaded.
+
+### Neutral is bit-identical
+
+With all seven new uniforms at their neutral values the render is
+**3.1763 / 13.250 / 13.962** — bit-identical to the Phase A/B base, coverage,
+mean R and luma. Re-checked one parameter at a time by explicitly re-asserting
+each neutral value: all seven identical. The whole 20-case regression sweep
+below restores exactly.
+
+### Swirl: the plan's coupling was right when written and wrong two phases later
+
+The plan specifies `k = swirlAmt * fullBlurAmount * …`, with the acceptance
+test *"swirl at zero aperture changes nothing — proof the defocus coupling
+holds"*. That test **failed** as first implemented, and the failure is a real
+cross-phase interaction rather than a transcription slip.
+
+`fullBlurAmount` does not start at zero. Spark computes
+`fullBlurAmount = blurAmount` and only then, if the defocus gate passes, raises
+it. Phase 5 had pinned `blurAmount` to 0, under which the plan's formula and its
+acceptance test are both correct. **Phase A restored it to 0.3**, so coupling to
+`fullBlurAmount` applies a constant swirl to every splat in the scene, in focus
+or not, scaling with the antialias setting — precisely the "warp, not lens"
+behaviour the coupling exists to prevent.
+
+Measured before the fix, `swirlAmt = 20` with depth of field **off**:
+
+| `blurAmount` | 0 | 0.3 | 1.0 |
+|---|---|---|---|
+| swirl off | 3.0478 | 3.1763 | 3.3484 |
+| swirl on | 3.0478 | 3.2417 | 3.4588 |
+| identical? | **yes** | no | no |
+
+The fix is to couple to the **defocus component only**:
+
+```glsl
+float swirlBlur = fullBlurAmount - blurAmount;
+if (swirlAmt > 0.0 && swirlBlur > 0.0) { … k = swirlAmt * swirlBlur * … }
+```
+
+Spark's own `clamp(sqr(focusRadius), blurAmount, …)` guarantees
+`fullBlurAmount >= blurAmount`, so the difference is exactly the defocus
+contribution and is never negative. After the fix, swirl at `dof = 100` is
+bit-identical at `blurAmount` **0, 0.3, 1.0 and 1.5** — the plan's criterion
+now holds, and holds *independently of the antialias setting*, which the plan's
+own version did not.
+
+Worth generalising: this is the second time in this port that a Phase A
+decision invalidated something written earlier (the first being every coverage
+figure in this file). **A default that a later formula reads as a baseline is
+not a free parameter.**
+
+### Swirl and its falloff — where the response actually lives
+
+The plan asks every new parameter to be swept before its range is settled, and
+guesses `swirlAmt` will want a log curve. **It does not.** At `dof = 45`, base
+coverage 4.5467:
+
+| `swirlAmt` | 0 | 0.5 | 1 | 2 | 4 | 6 | 10 | 15 | 20 | 25 | 30 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| coverage | 4.5467 | 4.5593 | 4.5713 | 4.5979 | 4.6445 | 4.6906 | 4.7771 | 4.8740 | 4.9642 | 5.0541 | 5.1313 |
+| Δ% | 0 | 0.28 | 0.54 | 1.13 | 2.15 | 3.16 | 5.07 | 7.20 | 9.18 | 11.16 | 12.86 |
+
+Straight-line, about +0.43% coverage per unit across the whole travel, with no
+bunching at either end and no sign of saturation at 30. A **linear 0–30 slider
+is correct**, which makes this the first parameter in this port whose first
+guess at a curve survived contact with a sweep — recorded because the standing
+assumption after `cullS`, `mdScale`, focus, aperture and splat opacity was that
+it would not.
+
+`swirlFalloff` (at `swirlAmt = 15`) is the opposite shape and its whole response
+sits in 0–3:
+
+| falloff | 0 | 0.5 | 1 | 2 | 3 | 5 |
+|---|---|---|---|---|---|---|
+| coverage | 7.1814 | 6.2198 | 5.5514 | 4.8740 | 4.6484 | 4.5556 |
+
+0 is uniform swirl across the whole frame; by 5 it is confined to the extreme
+corners and nearly inert. Default 2.
+
+### Focal surface — tilt, swing, curvature
+
+The exact check is arithmetic, not pixels: reproduce the shader's own line in
+JS and read the in-focus depth at frame edges. Pivot 2.7753, view-space frame
+edges `yEdge = 1.2941`, `xEdge = 2.1417`:
+
+| tilt | swing | curve | top | bottom | left | right | centre |
+|---|---|---|---|---|---|---|---|
+| 0 | 0 | 0 | 2.7753 | 2.7753 | 2.7753 | 2.7753 | 2.7753 |
+| **30** | 0 | 0 | **3.5225** | **2.0281** | 2.7753 | 2.7753 | 2.7753 |
+| −30 | 0 | 0 | 2.0281 | 3.5225 | 2.7753 | 2.7753 | 2.7753 |
+| 0 | **30** | 0 | 2.7753 | 2.7753 | **1.5388** | **4.0118** | 2.7753 |
+| 0 | 0 | **+1** | 5.5506 | 5.5506 | 5.5506 | 5.5506 | 2.7753 |
+| 0 | 0 | **−1** | 0.0001 | 0.0001 | 0.0001 | 0.0001 | 2.7753 |
+| 30 | 30 | 0.5 | 4.9101 | 3.4158 | 2.9264 | 5.3995 | 2.7753 |
+
+**The in-focus depth demonstrably differs across the frame**, which is the
+plan's acceptance criterion, and the spread is exactly what the geometry
+predicts: tilt 30° gives `2 × yEdge × tan(30°) = 1.4944` and the table gives
+`3.5225 − 2.0281 = 1.4944`. Swing 30° predicts `2 × xEdge × tan(30°) = 2.4731`
+and the table gives `4.0118 − 1.5388 = 2.4730`. Curvature +1 doubles the edge
+distance at `fcR = 1`. Curvature −1 drives it negative and the `max(…, 1e-4)`
+clamp fires — the focal surface legitimately bending behind the camera, correct
+behaviour rather than an error state. Tilt and swing compose with curvature and
+with each other. Tangents are stored, not degrees, and are clamped at ±75°
+(`tan 75° = 3.732051`, verified against a slider driven to 100).
+
+Uniform round-trip is exact: `planeTilt = 30` reaches the shader as
+`0.577350`, `tan(30°)` to six places.
+
+**The pixel-level "sharp band crosses the frame diagonally" test is not usable
+on this capture and is recorded as not run rather than as a pass.** The
+daffodil is a thin, roughly frontal subject: essentially everything in frame
+sits near one depth, so *any* tilt defocuses *everything* except the band
+through view-space y = 0, rather than trading sharpness between the top and the
+bottom. Measured, at `dof = 45`, coverage against tilt:
+
+| tilt° | −40 | −20 | −10 | 0 | 10 | 20 | 40 |
+|---|---|---|---|---|---|---|---|
+| coverage | 4.4205 | 4.0124 | 4.1870 | 4.5467 | 4.9182 | 5.2832 | 6.0339 |
+
+That has a minimum at about **−20°, not 0°** — consistent and interesting: the
+subject's own plane is slightly tipped relative to the optical axis, so a small
+negative tilt fits the focal surface to it and *sharpens the whole frame*,
+which is exactly what a view camera's front standard is for. It is real
+evidence the control does the right thing; it is not the diagonal-band
+demonstration the plan asked for, and that needs a subject with depth extent
+across the frame.
+
+### Energy — the one-correction check
+
+Sparse subset (`cullA = 0.85`), the measurement that actually isolates
+per-primitive energy from compositing overlap, per Phase 5:
+
+| | coverage | total luma | deviation vs DoF alone |
+|---|---|---|---|
+| DoF alone (`dof = 50`) | 4.1900 | 13.890 | — |
+| \+ smear 8 | 4.5490 | 14.038 | **+1.07%** |
+| \+ smear 8 + swirl 20 | 4.8337 | 14.094 | **+1.47%** |
+
+**Inside the plan's 2% bound.** One correction covers all three effects; there
+is no compounding darkening or brightening.
+
+The dense aggregate over the same three, for the record, is **+2.71%** —
+outside the bound, and *expected* to be, for exactly the reason Phase 5
+recorded: sequential alpha-over compositing of many overlapping semi-transparent
+layers is not additive, so summed displayed luma stops being a proxy for
+per-primitive energy once overlap is significant. The sparse figure is the one
+that tests the claim; the dense one is recorded as a known non-result, not
+smoothed over.
+
+### Global splat opacity — and where the plan's expectation was wrong
+
+A **uniform, not an `objectModifier`**. Alpha is written in the vertex shader,
+so a uniform costs nothing where a modifier change would call `updateVersion()`
+and re-bake the packed buffer on every frame of a slider drag. Logarithmic
+slider (log2, ×0.016 to ×1.5, default ×1) with a `SHOW` override, same "the
+slider position is not the value" case as `cullS`.
+
+Placed before Spark's `minAlpha` test so sub-threshold splats discard rather
+than shade. **Frame time is flat** from ×1.5 down to ×0.03 at 44k splats
+(0.045–0.089ms, noise), so the claimed performance *gain* is structural and
+unmeasured here — this capture is nowhere near fill-rate bound.
+
+**The plan predicts the model "erodes edges-inward" while "dense regions stay
+solid". Measured, that is not what happens — the fade dominates by a long way.**
+Pixel counts by luma band:
+
+| multiplier | 12–32 | 32–80 | 80–140 | 140–200 | >200 | total lit |
+|---|---|---|---|---|---|---|
+| ×1 | 594 | 920 | 1961 | 7730 | **5634** | 16839 |
+| ×0.5 | 729 | 959 | 2241 | 9709 | 3016 | 16654 |
+| ×0.25 | 787 | 1180 | 4754 | 9294 | **389** | 16404 |
+| ×0.125 | 853 | 2889 | 9747 | 2559 | 0 | 16048 |
+| ×0.0625 | 1229 | 9726 | 4647 | 61 | 0 | 15663 |
+| ×0.0156 | 12176 | 2015 | 0 | 0 | 0 | 14191 |
+
+At ×0.25 the **brightest** band is down 93% while the total lit area is down
+3%. The brightest band empties **first**, not last. The whole distribution
+walks downward and only the very edge of it falls off the `minAlpha` cliff:
+across the full travel to ×0.016 the lit area loses just 15.7%, while mean
+brightness inside it falls from 167.3 to 23.2 (−86%).
+
+That is the correct behaviour of a peak-alpha multiply on a cloud that is not
+overlap-saturated: scaling every contributing alpha scales the composite
+roughly multiplicatively, so bright pixels lose the most in absolute terms.
+"Dense regions stay solid" requires alpha-over to saturate, which needs far
+more overlap than a 44k capture has. Plausible on a 2M-splat scan; untested.
+The UI copy states the measured behaviour, not the predicted one.
+
+Above ×1 is not "more". Reading Spark's **fragment** shader confirms this and
+also corrects the plan on the mechanism: the plan quotes
+`shifted = sqrt(z2) - max(0, a-1)`, which in 2.1.0 sits inside an `if (false)`
+branch and never runs. The live branch is
+
+```glsl
+float a = exp((rgba.a*rgba.a - 1.0) / 2.718281828459045);
+float alpha = 1.0 - pow(1.0 - exp(-0.5 * z2), a);
+```
+
+— a different, sharper-topped profile. The *conclusion* the plan draws is right
+(alpha over 1 reads as harder-edged discs); the formula it cites is dead code.
+Worth recording as another instance of the standing rule that produced the
+whole Phase 5 rewrite: **read the shader that actually runs.**
+
+### `cullA` stays
+
+Not removed, per C4. Global opacity does not replace it: the anisotropy clamp
+handles needles, `cullS` handles oversized blobs, global opacity fades and
+thins everything uniformly, and none of them touch diffuse low-alpha haze,
+which is `cullA`'s one real job.
+
+### Full regression sweep, 20 cases
+
+`3_3_2025.ply`, 940×568, void, base **3.1763 / 13.250 / 13.962**. Each case is
+set from a full reset-all and reset again after, so no two are ever live at
+once. **Every case restores to base bit-identically**, and the final probe after
+the whole sweep is bit-identical to the first.
+
+| case | value | coverage | mean R | luma |
+|---|---|---|---|---|
+| `cullA` | 0.1 | 3.1758 | 13.249 | 13.960 |
+| `sat` | 2 | 3.1840 | 13.410 | 14.013 |
+| `dAmt` | 0.3 | 12.8791 | 21.423 | 22.355 |
+| `qAmt` | 0.6 | 2.9179 | 11.159 | 11.977 |
+| `dpAmt` | 0.8 | 2.9808 | 9.974 | 10.782 |
+| `dof` | 50 | 4.2428 | 13.802 | 14.680 |
+| `smearAmt` | 8 | 4.0585 | 13.835 | 14.668 |
+| `splatOpacity` | ×0.25 | 3.0872 | 12.118 | 12.879 |
+| `bright` | 1.4 | 3.1979 | 14.531 | 15.371 |
+| `scale` | 1.6 | 3.7215 | 13.550 | 14.314 |
+| `anisoLimit` | 8 | 3.1744 | 13.245 | 13.957 |
+| `blurAmount` | 0 | 3.0478 | 13.147 | 13.850 |
+| `maxPixelRadius` | 100 | 3.1763 | 13.250 | 13.962 |
+
+Six parameters are **inert at `dof = 100` by construction** and read as
+"no change" in the table above — that is the design, not a broken uniform, and
+it is the same shape of trap as `wAmt` reading as no-effect at `dAmt = 0`.
+Measured again with `dof = 50` (base 4.2428 / 13.802 / 14.680), where each one
+does move the picture:
+
+| case | value | coverage | mean R | luma |
+|---|---|---|---|---|
+| `nearBoost` | 4 | 5.1590 | 13.338 | 14.223 |
+| `swirlAmt` | 20 | 4.5870 | 13.937 | 14.874 |
+| `fieldCurve` | 1.5 | 5.4308 | 12.683 | 13.610 |
+| `planeTilt` | 30 | 5.1952 | 13.871 | 14.849 |
+| `planeSwing` | 30 | 4.4786 | 13.891 | 14.819 |
+| `dofStops` | +1 | (see Phase B) | | |
+
+`swirlFalloff` still reads as no change at `dof = 50` with `swirlAmt = 0`,
+correctly — it shapes an effect that is off. Its own sweep is above.
+
+### Preset
+
+**No version bump.** All seven are additive `SPEC` entries; v6 stands. Verified:
+round-trip byte-exact (modulo `saved`) with all seven off default plus `dof` and
+`dofStops`, and a synthetic v5 file with every Phase C key deleted loads
+cleanly, keeps the current values, and still runs the v5→v6 depth-of-field
+migration (`aperture 3° -> depth of field 64.5`,
+`focus 1.5×radius -> -0.80 stops`).
+
+### `updateSmear()` is now `updateShaderUniforms()`
+
+One function pushing all nine `spark.material.uniforms.*` from `V`, on the same
+per-frame path and for the same reason: THREE re-uploads a `ShaderMaterial`'s
+changed uniforms on every draw call, so none of these are gated by Spark's
+`viewChanged || version changed` and none need `mesh.updateVersion()`.
+
+Which side of the JS/GLSL boundary each conversion happens on follows from each
+uniform's own external contract, not from a house style: `smearAngle` goes over
+in degrees because the shader's own `radians()` call is in the patch text;
+`dof` is converted in JS because Spark's own `apertureAngle` property expects
+radians; tilt and swing are converted in JS to **tangents** because the shader
+wants a depth gradient per unit of view-space offset and `tan(angle)` is that
+quantity — a conversion, not a unit change; `splatOpacity` is converted in JS
+because the slider carries log2 of it.
+
+---
+
 ## Section accordion and `SPEC` groups
 
 `SPEC` entries are `[id, digits, group]`. The group ties a parameter to its rail
@@ -3001,6 +3316,14 @@ documented noise across navigations in a long-lived tab).
 ---
 
 ## Anisotropic smear (B1)
+
+> **Extended by "Optics port, Phase C" below.** `buildSmearVertexShader()` is
+> now `buildSplatVertexShader()` and patches **four** anchors rather than two;
+> the shader constant is `SPLAT_VERTEX_SHADER` and the anchor strings live in
+> one `SHADER_ANCHORS` object. `updateSmear()` is now `updateShaderUniforms()`
+> and pushes all nine shader uniforms. Everything below about *why* the hook
+> works this way, and about the upgrade hazard it creates, is unchanged and
+> still the governing constraint.
 
 Screen-space directional streak, added the same way Phase 5 added depth of
 field: as a modification to Spark's own `a`/`b`/`d` (2D covariance) inside
