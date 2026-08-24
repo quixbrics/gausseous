@@ -2980,6 +2980,165 @@ wants a depth gradient per unit of view-space offset and `tan(angle)` is that
 quantity — a conversion, not a unit change; `splatOpacity` is converted in JS
 because the slider carries log2 of it.
 
+## Optics port, Phase D — picked focus
+
+`DEV_PLAN_OPTICS_PORT.md`, Phase D. Depends on Phase C for the tilted focal
+surface. Tap the model to lock focus on a world-space point; it stays locked
+as you orbit, and Focus (stops) still offsets from it.
+
+### Depth buffers are meaningless on an alpha-blended cloud
+
+There is no single surface at a pixel, only a stack of semi-transparent
+gaussians. `pickDepth()` marches the tap ray front-to-back, projecting each
+cached splat to screen space and accumulating `opacity * gaussian(pixel
+distance)` in front-to-back depth order, taking the depth where accumulated
+alpha crosses `pickThresh`. That is the renderer's own compositing logic run
+by hand, so it returns the depth of whatever actually reads as the surface —
+not the depth of the nearest primitive, which on a translucent cloud is
+frequently not the same thing.
+
+### Object-space cache, not world-space — an improvement on the plan, not a deviation
+
+The plan's own limitation note says the cache "holds undisplaced object-space
+data" and drifts from the screen under Noise/Quantise/Wave/Smear, with
+`Readback` named as the eventual upgrade. That limitation is accepted as-is
+here — it is a real one and out of scope for this phase.
+
+What changed from the plan: the cache is built and stored in **object space**,
+with `mesh.matrixWorld` applied fresh on every `pickDepth()` call, rather than
+baking world-space positions once at cache-build time. Same cost — one 4×3
+matrix multiply per splat either way — but it means a Correct-mode transform
+commit needs **no cache invalidation at all**, where a world-space cache would
+go silently stale the moment the model moves. Verified structurally: the cache
+is never rebuilt on a transform commit and picks after one still land
+correctly, because the fresh `matrixWorld` is exactly what makes that true.
+
+**Area-equivalent radius from the two largest axes, not the single largest**,
+matching Phase A's anisotropy clamp reasoning: splats are discs, not spheres,
+and treating each as a sphere of its longest extent inflates the capture
+radius and makes picks land short — the exact failure the plan's own
+"cylinder bug" story describes for the whole-ray version of this mistake.
+
+### Verified exact against an independent CPU reference
+
+`pickDepth()`'s own logic re-implemented independently, outside the function,
+reading the same cache: **bit-identical** at the tested tap point —
+`2.5968379996456017` both ways, to every digit. A real synthetic
+`pointerdown` through the actual DOM listener produces a `spark.focalDistance`
+that matches the same value exactly.
+
+A **real mouse click** (not a synthetic event) on the flower's centre in a live
+browser session also worked end-to-end: `dofFocusSrc` flipped to "Focus on
+picked point" and the status line reported a locked depth, confirming the
+listener wiring and not just the math.
+
+### Pivoting the tilted surface through the picked point
+
+```
+fd = -viewPt.z - (swing * viewPt.x + tilt * viewPt.y)
+```
+
+Solves for the focal distance that makes the **tilted** surface pass through
+the picked point, rather than reading the point's raw depth — without this,
+tilting would drag focus off whatever was just picked, the opposite of how a
+view camera is actually used (pick the subject, then swing the standard around
+it). Verified against an independent reference at tilt −30° / 0° / +30°:
+**exact to under `1e-9`** at all three — `3.000559878887203`, `2.5968379996456017`,
+`2.1931161204040004` both ways.
+
+The tangents are recomputed here from `V` rather than read back out of
+`spark.material.uniforms`, deliberately — `updateShaderUniforms()` runs
+**after** `updateDofFocus()` in the frame loop (see both call sites), so
+reading the uniforms here would use last frame's tilt and reintroduce exactly
+the one-frame-lag hazard Phase 4 documents for camera uniforms. Deriving both
+straight from `V` removes the ordering dependency instead of merely documenting
+it. Field curvature is **not** compensated in the pivot — it is radial about
+the frame centre, the picked point moves through the frame as the camera
+orbits, and there is no fixed correction for a moving one. Left as an honest
+gap, consistent with the plan's own instruction to record limitations rather
+than paper over them.
+
+### Fails loudly on empty space — and a real gap the plan's wording didn't anticipate
+
+Tapping empty space (no surface within threshold) sets the status line to an
+error and leaves the **previous** lock and `focalDistance` completely
+undisturbed — verified: `spark.focalDistance` bit-identical before and after a
+miss. That is the plan's literal instruction ("fail loudly… rather than
+setting focus to garbage") and it holds for the interactive case.
+
+**A second empty-space path the plan didn't name: `dofFocusSrc` can be
+`"picked"` with `pickedPoint === null` through completely ordinary use, not
+just a miss.** `pickedPoint` is deliberately not persisted in presets — it is
+cache-derived and capture-specific, the same reasoning `CAMKEYS` and the
+transform basis already follow in this file. So a preset saved mid-session
+with a lock active, then reloaded (or loaded against a different capture),
+restores `dofFocusSrc = "picked"` with no live point behind it. `SPEC`'s and
+`SELECTS`' own forgiving-load rules only check that the option **exists**, not
+that the state behind it is real, so this reaches `updateDofFocus()`.
+
+**Caught by testing, not inspection, and it was a real bug, not a hypothetical:**
+the first version's branch order was `if (src === "picked" && pickedPoint) {…}
+else if (src === "manual" || !mesh) {…} else {…mask branch…}`. With `pickedPoint`
+null, `"picked"` fell all the way to the *mask* branch, which reads
+`V[\`rg${n}X\`]` — `V["rgpickedX"]`, undefined — and handed Spark a **NaN**
+`focalDistance`. Verified directly: `Number.isNaN(spark.focalDistance) ===
+true`. That is silent and strictly worse than the "garbage" the plan warns
+about: a NaN does not clip or clamp, it corrupts the frame, and nothing in the
+render would say why.
+
+Fixed by folding the un-picked `"picked"` case into the pivot branch:
+`src === "manual" || src === "picked" || !mesh`. Re-verified after the fix:
+`focalDistance` lands exactly on the pivot distance (`2.7753047965206017`,
+matching `camera.position.distanceTo(controls.target)` to every digit) rather
+than `NaN`, and the tested pick/tilt-pivot behaviour above was re-confirmed
+unchanged by the fix.
+
+### `pickThresh` — exposed, and it measurably moves where a pick lands
+
+Below 0.5 picks front haze, above it picks deeper into the cloud, per the
+plan. Measured at the same tap point, threshold 0.15 vs 0.9: **2.5952510855831017
+vs 2.5981807730831017** — deeper is farther, correctly ordered, a small but
+real and non-zero effect on this capture's opacity profile at that point.
+`pickThresh` itself is inert on the rendered frame at its neutral value and at
+every other value — it only affects the *next pick*, not the current render —
+confirmed as part of the full regression sweep below.
+
+### Mode interlocks — a third exclusive viewport owner, not a fourth exception
+
+Pick joins Adjust (gesture) and Correct as viewport-owning modes, and the
+existing interlock discipline extends rather than gets special-cased:
+
+- `syncControlsEnabled()` gained one more term: `!gestureOn && !draggingGizmo
+  && !pickOn`.
+- `setGesture(true)` now also calls `setPickMode(false)` — Adjust and Pick both
+  claim the canvas's own `pointerdown`, and two listeners racing on the same
+  event for different jobs is exactly the kind of bug this project's mode
+  system exists to prevent.
+- `enterCorrect()` calls `setPickMode(false)` alongside its existing
+  `setGesture(false)`, and the Pick toggle is disabled/re-enabled on the same
+  `for (const id of […])` lines that already own `gestureToggle`'s disabled
+  state.
+
+Verified, each transition live: arming Pick then calling `setGesture(true)`
+turns Pick off; arming Pick then entering Correct turns it off and disables
+the toggle; leaving Correct re-enables it. All three confirmed via direct
+state reads, not by inference from the UI.
+
+### Regression sweep and preset
+
+21-case sweep (20 from Phase C plus `pickThresh`), `3_3_2025.ply`, 940×568,
+void, base **3.1763 / 13.250 / 13.962**: every case restores to base
+bit-identically, and the final probe after the whole sweep is bit-identical to
+the first. `pickThresh` itself reads as "no change" in the table for the
+reason given above — it does not touch the render.
+
+**No version bump.** `pickThresh` is the only new `SPEC` entry Phase D adds
+(the pick point itself is intentionally session-only, per above), so it rides
+the same additive-field rule as every other phase in this port. Verified:
+`serialize() -> applyPreset() -> serialize()` byte-exact (modulo `saved`) with
+`pickThresh = 0.63`, and a synthetic v6 file with the key deleted loads
+cleanly and keeps the slider's current value rather than resetting it.
+
 ---
 
 ## Section accordion and `SPEC` groups

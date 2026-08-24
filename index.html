@@ -680,14 +680,21 @@
     <div class="subhead">Depth of field <em>lens blur</em></div>
     <p style="color:var(--ink-dim); margin:0 0 8px">Spark's own per-splat circle-of-confusion blur — a defocused splat is exactly another (wider, dimmer) Gaussian, so this composites correctly through the existing sort with no special handling. <strong>100 is exactly off</strong>, on the fast path, not an invisible blur still paying for itself.</p>
     <div class="btns" style="margin-bottom:9px">
-      <select id="dofFocusSrc" title="Pivot: the camera-to-orbit-target distance, whatever you are actually looking at. Mask: that slot's centre distance from the camera, tracked every frame, so moving or animating the mask pulls focus. Focus below offsets whichever of the two is chosen.">
+      <select id="dofFocusSrc" title="Pivot: the camera-to-orbit-target distance, whatever you are actually looking at. Mask: that slot's centre distance from the camera, tracked every frame, so moving or animating the mask pulls focus. Picked: a point tapped on the model, which stays locked as you orbit. Focus below offsets whichever is chosen.">
         <option value="manual" selected>Focus on pivot</option>
+        <option value="picked" disabled>Focus on picked point</option>
         <option value="1">Focus-pull: Mask 1</option>
         <option value="2">Focus-pull: Mask 2</option>
         <option value="3">Focus-pull: Mask 3</option>
         <option value="4">Focus-pull: Mask 4</option>
       </select>
     </div>
+    <div class="btns" style="margin-bottom:9px">
+      <button type="button" id="pickToggle" aria-pressed="false" title="Tap the model to focus on what you tapped. The point stays locked in world space as you orbit, and Focus (stops) still offsets from it.">Pick focus</button>
+      <button type="button" id="pickClear" disabled title="Return the focus source to the pivot.">Unlock</button>
+    </div>
+    <div class="row" title="How much accumulated alpha counts as 'a surface'. Below 0.5 picks front haze, above it picks deeper into the cloud."><label>Pick threshold</label><output id="o-pickThresh">—</output>
+      <input type="range" id="p-pickThresh" min="0.05" max="0.95" step="0.01" value="0.5"></div>
     <div class="row" title="Depth of field, 0 = maximum blur, 100 = none. Deliberately not an f-number: Spark's apertureAngle is not calibrated to a physical aperture, so a real-lens label would be photographically meaningless."><label>Depth of field</label><output id="o-dof">—</output>
       <input type="range" id="p-dof" min="0" max="100" step="0.5" value="100"></div>
     <div class="row" title="Focus offset in stops (doublings) from the focus source above. 0 focuses exactly on it, +1 twice as far, -1 half as far. Scale-free, so the same slider position means the same thing on a tabletop scan and on a building."><label>Focus (stops)</label><output id="o-dofStops">—</output>
@@ -1011,6 +1018,12 @@ const XFORM_DEFAULT = { rotX: 180, rotY: 0, rotZ: 0, posX: 0, posY: 0, posZ: 0, 
 let xform = { ...XFORM_DEFAULT };     // COMMITTED transform; drives the mesh
 let xformEntry = null;                // snapshot on entering Correct, for Cancel
 let correcting = false;
+/* Picked focus (Phase D). Up here with the rest of the module state, not
+   beside its own functions: syncControlsEnabled() near the top reads pickOn,
+   and a `let` below its first reader is exactly the TDZ that killed v1. */
+let pickOn = false;
+let pickCache = null;                      // object-space centres/radii/opacities, built lazily
+let pickedPoint = null;                    // world-space THREE.Vector3, or null
 let prevCamModeForCorrect = null;      // restored on leaving Correct
 
 /* ------------------------------------------------------------------ *
@@ -1289,7 +1302,7 @@ xctl.getHelper().visible = false;
    Go A / Go B got clobbered earlier in this file; route both through here. */
 let draggingGizmo = false;
 function syncControlsEnabled() {
-  controls.enabled = !gestureOn && !draggingGizmo;
+  controls.enabled = !gestureOn && !draggingGizmo && !pickOn;
 }
 xctl.addEventListener("dragging-changed", (e) => {
   draggingGizmo = e.value;
@@ -1903,7 +1916,7 @@ const SPEC = [
   /* Depth fade and depth of field share one "Depth" section in the rail, so
      they share one group id — refreshGroups()'s driven/dirty flag then counts
      the whole section, which is what the collapsed title should report. */
-  ["dof", 1, "depth"], ["dofStops", 2, "depth"], ["nearBoost", 2, "depth"],
+  ["dof", 1, "depth"], ["dofStops", 2, "depth"], ["nearBoost", 2, "depth"], ["pickThresh", 2, "depth"],
   ["smearAmt", 1, "smear"], ["smearAngle", 0, "smear"],
   /* Optics — SparkRenderer properties, not dyno uniforms. They ride the same
      SPEC machinery (reset, envelopes, audio routing, presets) and are written
@@ -2943,6 +2956,7 @@ function enterCorrect() {
   prevCamModeForCorrect = camMode;
   setCamMode("manual");                    // driveCamera() reads camMode live; see NOTES
   setGesture(false);                       // Correct owns the viewport — see syncControlsEnabled
+  setPickMode(false);                      // ...and so does the gizmo's own pointerdown
 
   document.body.classList.add("correcting");
   $("correctToggle").classList.add("on");
@@ -2951,6 +2965,7 @@ function enterCorrect() {
   for (const id of ["xformCommit", "xformCancel", "gizMove", "gizRotate", "gizScale"]) $(id).disabled = false;
   for (const id of ["mdRotX", "mdRotY", "mdRotZ", "mdPosX", "mdPosY", "mdPosZ", "mdScale"]) $("p-" + id).disabled = false;
   $("gestureToggle").disabled = true;
+  $("pickToggle").disabled = true;
   $("render").disabled = true;
 
   xctl.attach(mesh);
@@ -2972,6 +2987,7 @@ function leaveCorrect() {
   for (const id of ["xformCommit", "xformCancel", "gizMove", "gizRotate", "gizScale"]) $(id).disabled = true;
   for (const id of ["mdRotX", "mdRotY", "mdRotZ", "mdPosX", "mdPosY", "mdPosZ", "mdScale"]) $("p-" + id).disabled = true;
   $("gestureToggle").disabled = false;
+  $("pickToggle").disabled = false;
   $("render").disabled = !CAN_EXPORT;
 
   xctl.detach();
@@ -3112,6 +3128,14 @@ const splatCount = (m) => m?.numSplats ?? m?.packedSplats?.numSplats ?? 0;
 async function loadSplat(source, label) {
   if (rendering) { setStatus("Busy rendering — wait for the export to finish.", true); return; }
   if (mesh) { scene.remove(mesh); mesh.dispose?.(); mesh = null; }
+
+  /* Object-space indices and cached splat data from the PREVIOUS capture mean
+     nothing against a new one — same reasoning captureObjectBasis() and
+     CAMKEYS already follow just below. clearPick() also flips dofFocusSrc off
+     "picked" if it was on, which matters here: leaving it selected against an
+     empty pickedPoint would silently fall through to focalDistance = 0. */
+  clearPick();
+  pickCache = null;
 
   setStatus(`Loading ${label}…`);
   $("drop").classList.add("hide");
@@ -3537,7 +3561,37 @@ function updateDofFocus() {
      it — racking away from a tracked subject stays possible. */
   let base;
   const src = $("dofFocusSrc").value;
-  if (src === "manual" || !mesh) {
+  if (src === "picked" && pickedPoint) {
+    /* PIVOT THE TILTED SURFACE THROUGH THE PICKED POINT. Solving for the
+       focalDistance that makes the tilted plane pass through the point, not
+       simply reading the point's depth — without this, tilting would drag
+       focus off whatever was just picked, which is the opposite of how a view
+       camera is used: you pick the subject, THEN swing the standard around it.
+
+       The tangents are recomputed here from V rather than read back out of
+       spark.material.uniforms, deliberately: updateShaderUniforms() runs AFTER
+       this function in the frame loop, so reading the uniforms would use last
+       frame's tilt and reintroduce exactly the one-frame lag Phase 4 documents.
+       Deriving both from V removes the ordering dependency instead of
+       documenting it. Field curvature is not compensated — it is radial about
+       the frame centre and the picked point moves through the frame as you
+       orbit, so there is no fixed correction, only a moving one. */
+    const vp = pickedPoint.clone().applyMatrix4(camera.matrixWorldInverse);
+    const tl = Math.tan(clampDeg75(V.planeTilt) * (Math.PI / 180));
+    const sg = Math.tan(clampDeg75(V.planeSwing) * (Math.PI / 180));
+    base = -vp.z - (sg * vp.x + tl * vp.y);
+  } else if (src === "manual" || src === "picked" || !mesh) {
+    /* src === "picked" falls here too, specifically when pickedPoint is
+       null — a preset saved mid-session with a lock active, then reloaded
+       (or loaded against a different capture) with no live pick. pickedPoint
+       is deliberately NOT persisted (it is object-space-cache-derived and
+       capture-specific, same reasoning CAMKEYS and the transform basis
+       already follow), so this state is reachable through completely normal
+       use, not a hypothetical. Falling through to the region-slot branch
+       below would read V["rgpickedX"] — undefined — and hand Spark a NaN
+       focalDistance, which is silent and much worse than the pivot: a NaN
+       here does not clip, it corrupts the frame. Land on the pivot instead,
+       matching what an un-picked "picked" state should mean. */
     base = camera.position.distanceTo(controls.target);
   } else {
     const n = src;
@@ -3552,6 +3606,168 @@ function updateDofFocus() {
      switch depth of field OFF rather than focusing very close. */
   spark.focalDistance = Math.max(base * Math.pow(2, V.dofStops), 1e-4);
 }
+
+/* ------------------------------------------------------------------ *
+ * Picked focus — Phase D of DEV_PLAN_OPTICS_PORT.md
+ *
+ * A depth buffer is meaningless on an alpha-blended cloud: there is no
+ * single surface at a pixel, only a stack of semi-transparent gaussians. So
+ * march the tap ray front-to-back accumulating alpha and take the depth
+ * where it crosses a threshold — the renderer's OWN compositing logic, which
+ * is why it returns the depth of whatever reads as the surface rather than
+ * the depth of the nearest primitive.
+ *
+ * TEST IN SCREEN SPACE. The rig's first version measured perpendicular
+ * distance from a world-space ray against a fixed world-space radius —
+ * effectively a cylinder, so distant splats were over-captured, alpha
+ * crossed threshold too early, and focus landed consistently short.
+ * Projecting each splat and testing in pixels is both the space the tap
+ * happened in and the space the renderer composites in.
+ * ------------------------------------------------------------------ */
+
+/* Object-space cache, NOT world-space. The plan says world; caching object
+   space and applying mesh.matrixWorld per pick is strictly better for the
+   same cost, because a Correct-mode commit or any model transform then needs
+   no invalidation at all — 44k matrix applies on a click is nothing, where a
+   stale world-space cache after a transform is a silent wrong answer.
+
+   Built lazily on first entry into Pick mode rather than on load: it walks
+   every splat, and most sessions never pick. Cleared on load. */
+
+function buildPickCache() {
+  if (!mesh) return null;
+  const t0 = performance.now();
+  const cx = [], rad = [], op = [];
+  mesh.forEachSplat((i, center, scales, quat, opacity) => {
+    cx.push(center.x, center.y, center.z);
+    /* Area-equivalent radius of the two LARGEST axes, not the single largest.
+       Splats are discs — two comparable axes and one tiny one — so treating
+       each as a sphere of its longest extent inflates the capture radius and
+       makes the pick land short, which is the same failure the cylinder bug
+       produced by a different route. */
+    const a = scales.x, b = scales.y, c = scales.z;
+    const mx = Math.max(a, b, c), mn = Math.min(a, b, c);
+    rad.push(Math.sqrt(mx * (a + b + c - mx - mn)));
+    op.push(opacity);
+  });
+  pickCache = {
+    n: op.length,
+    pos: new Float32Array(cx),
+    rad: new Float32Array(rad),
+    op: new Float32Array(op),
+    ms: +(performance.now() - t0).toFixed(1),
+  };
+  return pickCache;
+}
+
+/* Returns view-axis depth — exactly the quantity focalDistance wants — or
+   null if the accumulated alpha never reached the threshold. */
+function pickDepth(tapX, tapY) {           // CSS pixels, relative to the canvas
+  const cache = pickCache ?? buildPickCache();
+  if (!cache || !cache.n) return null;
+  const el = renderer.domElement;
+  const W = el.clientWidth, H = el.clientHeight;
+  mesh.updateMatrixWorld(true);
+  camera.updateMatrixWorld();
+
+  /* One combined object -> view matrix, so the inner loop is a single 4x3
+     multiply per splat rather than two. */
+  const m = new THREE.Matrix4().multiplyMatrices(camera.matrixWorldInverse, mesh.matrixWorld);
+  const e = m.elements;
+  /* Uniform scale factor of the model transform, for the cached object-space
+     radii. mdScale is a uniform scale, so one component is the whole story. */
+  const mScale = mesh.matrixWorld.getMaxScaleOnAxis();
+
+  const focalPx = (H * 0.5) / Math.tan((camera.fov * Math.PI / 180) * 0.5);
+  const ccx = W * 0.5, ccy = H * 0.5;
+  const { pos, rad, op, n } = cache;
+  const depths = [], weights = [];
+
+  for (let i = 0; i < n; i++) {
+    const j = i * 3, x = pos[j], y = pos[j + 1], z = pos[j + 2];
+    const vz = e[2] * x + e[6] * y + e[10] * z + e[14];
+    const d = -vz;
+    if (d <= 1e-4) continue;                              // behind the camera
+    const vx = e[0] * x + e[4] * y + e[8] * z + e[12];
+    const vy = e[1] * x + e[5] * y + e[9] * z + e[13];
+    const dx = ccx + focalPx * vx / d - tapX;
+    const dy = ccy - focalPx * vy / d - tapY;
+    const d2 = dx * dx + dy * dy;
+    const sig = Math.max(focalPx * rad[i] * mScale / d, 0.75);   // floor at sub-pixel
+    const s2 = sig * sig;
+    if (d2 > 9 * s2) continue;                            // outside 3 sigma
+    const w = op[i] * Math.exp(-0.5 * d2 / s2);
+    if (w > 0.004) { depths.push(d); weights.push(w); }
+  }
+  if (!depths.length) return null;
+
+  const idx = depths.map((_, i) => i).sort((a, b) => depths[a] - depths[b]);
+  let acc = 0;
+  for (const i of idx) {
+    acc += (1 - acc) * Math.min(weights[i], 1);
+    if (acc >= V.pickThresh) return depths[i];
+  }
+  return null;
+}
+
+function setPickMode(on) {
+  if (on && correcting) return;            // Correct owns the viewport, same rule as Adjust
+  if (on) setGesture(false);               // and Adjust and Pick cannot both own a pointerdown
+  pickOn = on;
+  syncControlsEnabled();
+  document.body.classList.toggle("picking", on);
+  $("pickToggle").classList.toggle("on", on);
+  $("pickToggle").setAttribute("aria-pressed", String(on));
+  $("pickToggle").textContent = on ? "Picking…" : "Pick focus";
+  if (on && mesh && !pickCache) {
+    const c = buildPickCache();
+    if (c) setStatus(`Pick focus armed — cached ${c.n.toLocaleString()} splats in ${c.ms}ms. Tap the model.`);
+  } else if (on) {
+    setStatus("Pick focus armed — tap the model.");
+  }
+}
+$("pickToggle").onclick = () => setPickMode(!pickOn);
+
+function clearPick() {
+  pickedPoint = null;
+  $("pickClear").disabled = true;
+  $("dofFocusSrc").querySelector('option[value="picked"]').disabled = true;
+  if ($("dofFocusSrc").value === "picked") $("dofFocusSrc").value = "manual";
+  updateDofFocus();
+  setStatus("Focus unlocked — back on the pivot.");
+}
+$("pickClear").onclick = clearPick;
+
+renderer.domElement.addEventListener("pointerdown", (ev) => {
+  if (!pickOn || !mesh) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  const depth = pickDepth(ev.clientX - r.left, ev.clientY - r.top);
+  if (depth == null) {
+    /* Fail loudly. Setting focus to some fallback would land it somewhere
+       arbitrary and look like the pick "worked" — a wrong answer delivered
+       confidently is the failure mode this file keeps guarding against. */
+    setStatus("No surface there — accumulated alpha never reached the pick threshold.", true);
+    return;
+  }
+  /* pickDepth() returns view-axis depth; convert to a distance along the tap
+     ray so the stored world point sits exactly under the pointer rather than
+     on the optical axis at the same depth. */
+  const ndc = new THREE.Vector2(
+    ((ev.clientX - r.left) / r.width) * 2 - 1,
+    -((ev.clientY - r.top) / r.height) * 2 + 1,
+  );
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(ndc, camera);
+  const fwd = camera.getWorldDirection(new THREE.Vector3());
+  const t = depth / Math.max(ray.ray.direction.dot(fwd), 1e-4);
+  pickedPoint = ray.ray.origin.clone().addScaledVector(ray.ray.direction, t);
+
+  $("dofFocusSrc").querySelector('option[value="picked"]').disabled = false;
+  $("dofFocusSrc").value = "picked";
+  $("pickClear").disabled = false;
+  updateDofFocus();
+  setStatus(`Focus locked at ${depth.toFixed(3)} — stays on that point as you orbit.`);
+});
 
 /* Shader uniforms — same per-frame discipline as updateDofFocus() just above,
    and for the same reason: every one of these can be envelope- or audio-driven,
@@ -4514,6 +4730,7 @@ $("gestInvert").onchange = () => {
 
 function setGesture(on) {
   if (on && correcting) return;           // Correct owns the viewport; see syncControlsEnabled
+  if (on) setPickMode(false);             // ...and Adjust and Pick both claim pointerdown
   gestureOn = on;
   syncControlsEnabled();                  // modal: never both Adjust and orbit/gizmo at once
   document.body.classList.toggle("gesture", on);
@@ -4879,6 +5096,13 @@ if (new URLSearchParams(location.search).has("debug")) {
     setGesture,
     get xform(){ return xform; },
     get correcting(){ return correcting; },
+    get pickOn(){ return pickOn; },
+    get pickCache(){ return pickCache; },
+    get pickedPoint(){ return pickedPoint; },
+    buildPickCache,
+    pickDepth,
+    setPickMode,
+    clearPick,
     get radius(){ return radius; },
     get bounds(){ return bounds; },
     get CAMKEYS(){ return CAMKEYS; },
