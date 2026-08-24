@@ -846,8 +846,27 @@
       <input type="range" id="p-smearAngle" min="0" max="180" step="1" value="0"></div>
   </details>
 
+  <details class="mod" data-group="film">
+    <summary>Film <em>emulsion profile</em><i class="gflag"></i></summary>
+    <p style="color:var(--ink-dim); margin:0 0 8px">Parametric approximations, hand-tuned rather than measured — named descriptively rather than after real stocks, so nothing here claims an accuracy it does not have. <strong>Intensity 0 is an exact bypass</strong>, the only honest way to A/B a look.</p>
+    <div class="btns" style="margin-bottom:9px">
+      <select id="filmProfile" title="Selects a fixed set of spectral sensitivity, colour response, contrast and halation values. Not itself animatable — switch looks, then animate Intensity/Exposure/Halation/Veil around the chosen one.">
+        <option value="none" selected>None (bypass)</option>
+      </select>
+    </div>
+    <div class="row" title="0 bypasses the whole film chain exactly — the only honest way to A/B against the untouched render."><label>Intensity</label><output id="o-filmMix">—</output>
+      <input type="range" id="p-filmMix" min="0" max="1" step="0.01" value="0"></div>
+    <div class="row" title="In stops, applied before the film response curve."><label>Exposure</label><output id="o-exposure">—</output>
+      <input type="range" id="p-exposure" min="-2" max="2" step="0.02" value="0"></div>
+    <div class="row" title="A tight bright-pass ring blur that blooms highlights warm — light scattering inside the film base. Different from Veiling flare below: narrow radius, high threshold, rings around bright points."><label>Halation</label><output id="o-halScale">—</output>
+      <input type="range" id="p-halScale" min="0" max="2" step="0.01" value="1"></div>
+    <div class="row" title="A wide, low-threshold, low-amplitude lift across the whole frame — uncoated-lens scatter, not halation. This is most of the 'soft large-format glow' cue."><label>Veiling flare</label><output id="o-veil">—</output>
+      <input type="range" id="p-veil" min="0" max="1.5" step="0.01" value="0"></div>
+  </details>
+
   <details class="mod" data-group="frame">
-    <summary>Frame <em>vignette</em><i class="gflag"></i></summary>
+    <summary>Frame <em>vignette + rebate</em><i class="gflag"></i></summary>
+    <div class="subhead">Vignette <em>lens falloff</em></div>
     <p style="color:var(--ink-dim); margin:0 0 8px">A fullscreen pass over the finished render, not a per-splat effect — darkens toward the edges in linear light, so it behaves like lost light rather than revealing the background through a translucent cloud. No effect at Amount 0.</p>
     <div class="row"><label>Amount</label><output id="o-vigAmt">—</output>
       <input type="range" id="p-vigAmt" min="0" max="1" step="0.01" value="0"></div>
@@ -855,6 +874,27 @@
       <input type="range" id="p-vigRadius" min="0.1" max="1.6" step="0.01" value="0.65"></div>
     <div class="row"><label>Softness</label><output id="o-vigSoft">—</output>
       <input type="range" id="p-vigSoft" min="0.05" max="1.5" step="0.01" value="0.75"></div>
+    <div class="subhead">Rebate <em>film edge</em></div>
+    <p style="color:var(--ink-dim); margin:0 0 8px">The physical carrier around the image, applied last — crop, fill, rounded-box edge with a noise-perturbed border. No effect at Border 0 or Aspect "No frame".</p>
+    <div class="btns" style="margin-bottom:9px">
+      <select id="frAspect">
+        <option value="0" selected>No frame</option>
+        <option value="1.0">Square 1:1</option>
+        <option value="0.8">Portrait 4:5</option>
+        <option value="1.25">Landscape 5:4</option>
+        <option value="1.333">Landscape 4:3</option>
+      </select>
+    </div>
+    <div class="row"><label>Fill</label><output id="o-frFill">—</output>
+      <input type="range" id="p-frFill" min="0.5" max="1" step="0.005" value="0.9"></div>
+    <div class="row"><label>Border</label><output id="o-frBorder">—</output>
+      <input type="range" id="p-frBorder" min="0" max="1" step="0.01" value="0"></div>
+    <div class="row"><label>Edge irregularity</label><output id="o-frJitter">—</output>
+      <input type="range" id="p-frJitter" min="0" max="1" step="0.01" value="0.4"></div>
+    <div class="row"><label>Corner radius</label><output id="o-frRadius">—</output>
+      <input type="range" id="p-frRadius" min="0" max="0.2" step="0.002" value="0.02"></div>
+    <div class="row"><label>Tilt</label><output id="o-frTilt">—</output>
+      <input type="range" id="p-frTilt" min="-3" max="3" step="0.05" value="0"></div>
   </details>
 
   <details class="mod" data-group="grain">
@@ -1099,7 +1139,7 @@ function applyBgColor() {
   mesh?.updateVersion();
 }
 $("bgColor").onchange = applyBgColor;
-for (const id of ["dField", "dcMode", "dcAxis", "qAxis", "wMode", "dpMode"]) $(id).onchange = () => pushUniforms();
+for (const id of ["dField", "dcMode", "dcAxis", "qAxis", "wMode", "dpMode", "frAspect"]) $(id).onchange = () => pushUniforms();
 $("dofFocusSrc").onchange = () => updateDofFocus();
 
 const scene = new THREE.Scene();
@@ -1354,6 +1394,78 @@ scene.add(spark);
  * from that snapshot back onto the same canvas. Spark never sees anything
  * but the canvas, ever; nothing about its internal target-detection can
  * diverge, because there is no second target for it to diverge against. */
+/* ------------------------------------------------------------------ *
+ * Film profiles — Phase F of DEV_PLAN_OPTICS_PORT.md.
+ *
+ * Hand-tuned parametric approximations, not measured film response. Real
+ * emulation means a measured 3D LUT (deferred, per the plan — see NOTES);
+ * this is the honest parametric chain that comes before it. Names are
+ * descriptive rather than brand names, so nothing here claims an accuracy
+ * it does not have. Ported verbatim from Optics/optics.html's own PROFILES
+ * table — these are numbers, not behaviour to re-express, and the plan's
+ * validation table marks them "visually road-tested" as-is.
+ *
+ * sens   B&W spectral sensitivity — the entire content of a black-and-white
+ *        profile. Orthochromatic stock is blind to red (skin dark, skies
+ *        pale); infrared inverts it. A profile that merely desaturates is a
+ *        greyscale conversion, not an emulation.
+ * mix    3x3 channel crosstalk, applied in linear. Identity = none.
+ * con    contrast exponent about 0.18 mid grey.
+ * white  highlight rolloff white point (extended Reinhard). Lower
+ *        compresses harder — this is what separates a film curve from a
+ *        digital one, rolling the shoulder off toward a white point instead
+ *        of clipping.
+ * sat / satRoll  saturation, and how fast it falls off approaching the
+ *        shoulder — film desaturates near the highlight rolloff, video does
+ *        not.
+ * lift   additive black lift, for faded/bleached looks.
+ * shTint / hiTint  split toning, applied after encode, in display space
+ *        where it is judged by eye.
+ * hal / halTint  halation strength and tint — light scattering off the film
+ *        base, why it is reddish and why it only shows around highlights.
+ * ------------------------------------------------------------------ */
+const FILM_I3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+const FILM_PROFILES = [
+  { id: "neutral", name: "Neutral — clean digital",
+    mono: 0, sens: [0.2126, 0.7152, 0.0722], mix: FILM_I3, con: 1.0, white: 4.0, sat: 1.0, satRoll: 0.0,
+    lift: 0.0, shTint: [1, 1, 1], hiTint: [1, 1, 1], hal: 0.0, halTint: [1, 0.4, 0.25] },
+  { id: "warmneg", name: "Warm negative — portrait",
+    mono: 0, sens: [0.2126, 0.7152, 0.0722],
+    mix: [1.02, -0.01, -0.01, -0.02, 1.00, 0.02, 0.00, -0.03, 1.03],
+    con: 0.88, white: 6.0, sat: 1.05, satRoll: 0.45,
+    lift: 0.012, shTint: [0.97, 1.00, 1.04], hiTint: [1.05, 1.01, 0.94], hal: 0.5, halTint: [1, 0.42, 0.22] },
+  { id: "slide", name: "Punchy slide — reversal",
+    mono: 0, sens: [0.2126, 0.7152, 0.0722],
+    mix: [1.06, -0.04, -0.02, -0.03, 1.05, -0.02, -0.02, -0.05, 1.07],
+    con: 1.32, white: 2.2, sat: 1.28, satRoll: 0.25,
+    lift: 0.0, shTint: [0.96, 0.99, 1.06], hiTint: [1.02, 1.00, 0.98], hal: 0.35, halTint: [1, 0.45, 0.3] },
+  { id: "faded", name: "Faded — bleached, lifted",
+    mono: 0, sens: [0.2126, 0.7152, 0.0722],
+    mix: [0.98, 0.03, 0.02, 0.02, 0.97, 0.03, 0.04, 0.04, 0.94],
+    con: 0.78, white: 8.0, sat: 0.62, satRoll: 0.55,
+    lift: 0.045, shTint: [0.95, 1.02, 1.05], hiTint: [1.04, 1.02, 0.96], hal: 0.3, halTint: [1, 0.5, 0.3] },
+  { id: "cross", name: "Cross process",
+    mono: 0, sens: [0.2126, 0.7152, 0.0722],
+    mix: [1.15, -0.10, 0.02, -0.08, 1.06, 0.06, 0.10, -0.14, 1.08],
+    con: 1.45, white: 2.6, sat: 1.15, satRoll: 0.2,
+    lift: 0.02, shTint: [0.88, 1.06, 0.94], hiTint: [1.08, 0.96, 1.06], hal: 0.6, halTint: [0.9, 0.5, 1] },
+  { id: "pan", name: "B&W — panchromatic",
+    mono: 1, sens: [0.299, 0.587, 0.114], mix: FILM_I3, con: 1.08, white: 3.2, sat: 0, satRoll: 0,
+    lift: 0.008, shTint: [1, 1, 1], hiTint: [1, 1, 1], hal: 0.3, halTint: [1, 0.6, 0.4] },
+  { id: "ortho", name: "B&W — orthochromatic",
+    mono: 1, sens: [0.04, 0.44, 0.52], mix: FILM_I3, con: 1.18, white: 2.8, sat: 0, satRoll: 0,
+    lift: 0.006, shTint: [0.99, 1.00, 1.02], hiTint: [1.02, 1.01, 0.98], hal: 0.25, halTint: [1, 0.6, 0.4] },
+  { id: "ir", name: "B&W — infrared",
+    mono: 1, sens: [0.80, 0.24, -0.04], mix: FILM_I3, con: 1.30, white: 2.0, sat: 0, satRoll: 0,
+    lift: 0.0, shTint: [1, 1, 1], hiTint: [1, 1, 1], hal: 1.4, halTint: [1, 0.7, 0.55] },
+  { id: "lith", name: "B&W — high contrast",
+    mono: 1, sens: [0.26, 0.60, 0.14], mix: FILM_I3, con: 2.10, white: 1.5, sat: 0, satRoll: 0,
+    lift: 0.0, shTint: [1, 1, 1], hiTint: [1, 1, 1], hal: 0.2, halTint: [1, 0.6, 0.4] },
+  { id: "selen", name: "B&W — warm tone",
+    mono: 1, sens: [0.30, 0.58, 0.12], mix: FILM_I3, con: 1.02, white: 4.5, sat: 0, satRoll: 0,
+    lift: 0.02, shTint: [0.94, 0.97, 1.08], hiTint: [1.08, 1.02, 0.90], hal: 0.35, halTint: [1, 0.6, 0.4] },
+];
+
 let postTex = new THREE.FramebufferTexture(2, 2);
 const postScene = new THREE.Scene();
 const postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -1362,6 +1474,15 @@ const postMat = new THREE.ShaderMaterial({
     tDiffuse: { value: postTex }, res: { value: new THREE.Vector2(2, 2) },
     vigAmt: { value: 0 }, vigRadius: { value: 0.65 }, vigSoft: { value: 0.75 },
     grainAmt: { value: 0 }, grainSize: { value: 3 }, grainColor: { value: 0 }, seed: { value: 0 },
+    filmMix: { value: 0 }, exposure: { value: 1 },
+    fMono: { value: 0 }, fSens: { value: new THREE.Vector3(0.2126, 0.7152, 0.0722) },
+    fMat: { value: new THREE.Matrix3() },
+    fCon: { value: 1 }, fWhite: { value: 4 }, fSat: { value: 1 }, fSatRoll: { value: 0 }, fLift: { value: 0 },
+    fShTint: { value: new THREE.Vector3(1, 1, 1) }, fHiTint: { value: new THREE.Vector3(1, 1, 1) },
+    fHal: { value: 0 }, fHalTint: { value: new THREE.Vector3(1, 0.4, 0.25) }, halScale: { value: 1 },
+    veil: { value: 0 },
+    frAspect: { value: 0 }, frFill: { value: 0.9 }, frBorder: { value: 0 },
+    frJitter: { value: 0.4 }, frRadius: { value: 0.02 }, frTilt: { value: 0 },
   },
   vertexShader: `varying vec2 vUv;
     void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
@@ -1387,6 +1508,13 @@ const postMat = new THREE.ShaderMaterial({
     uniform sampler2D tDiffuse; uniform vec2 res;
     uniform float vigAmt, vigRadius, vigSoft;
     uniform float grainAmt, grainSize, grainColor, seed;
+    uniform float filmMix, exposure;
+    uniform float fMono; uniform vec3 fSens; uniform mat3 fMat;
+    uniform float fCon, fWhite, fSat, fSatRoll, fLift;
+    uniform vec3 fShTint, fHiTint;
+    uniform float fHal, halScale; uniform vec3 fHalTint;
+    uniform float veil;
+    uniform float frAspect, frFill, frBorder, frJitter, frRadius, frTilt;
 
     const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
@@ -1467,7 +1595,86 @@ const postMat = new THREE.ShaderMaterial({
         lin *= clamp(1.0 - vigAmt * smoothstep(vigRadius, vigRadius + vigSoft, length(dv)), 0.0, 1.0);
       }
 
-      vec3 col = srgbEncode(lin);
+      /* --- film chain, gated on filmMix as a WHOLE, not per-term ---------
+         filmMix = 0 is an EXACT BYPASS, not a neutral profile: the entire
+         block below (halation, veil, emulsion response, saturation) is
+         skipped, and outLin is exactly the vignetted lin. That is the only
+         honest way to A/B a look against the untouched render — a "neutral"
+         profile that still ran the maths could round differently even at
+         its own identity settings. */
+      vec3 outLin = lin;
+      if (filmMix > 0.0) {
+        vec3 c = lin * exposure;
+
+        /* --- film base: halation. Bright-pass, cheap 8-tap ring blur,
+           tinted and added as light — this is why film highlights bloom
+           warm rather than clipping cleanly. Each tap is a FRESH sample of
+           the source, decoded independently, not a re-use of the centre
+           pixel's own vignetted lin value — halation samples neighbouring
+           SCREEN POSITIONS, so it needs its own texture fetches. */
+        if (fHal > 0.0 && halScale > 0.0) {
+          vec3 acc = vec3(0.0);
+          float rr = (7.0 * halScale) / max(res.y, 1.0);
+          for (int i = 0; i < 8; i++) {
+            float ang = float(i) * 0.7853981634;
+            vec2 off = vec2(cos(ang), sin(ang)) * rr * vec2(res.y / max(res.x, 1.0), 1.0);
+            vec3 s = srgbDecode(texture2D(tDiffuse, vUv + off).rgb);
+            acc += max(s - 0.55, 0.0);
+          }
+          c += (acc / 8.0) * fHalTint * fHal;
+        }
+
+        /* Veiling flare: a wide, low-amplitude lift across the whole frame.
+           This is uncoated-lens scatter, not halation — a much larger
+           radius and a much lower threshold, so it veils shadows rather
+           than ringing highlights. Most of the "soft large-format glow"
+           cue comes from this, not from halation. */
+        if (veil > 0.0) {
+          vec3 vacc = vec3(0.0);
+          float vr = 55.0 / max(res.y, 1.0);
+          for (int i = 0; i < 6; i++) {
+            float ang = float(i) * 1.0471975512 + 0.4;
+            vec2 off = vec2(cos(ang), sin(ang)) * vr * vec2(res.y / max(res.x, 1.0), 1.0);
+            vacc += max(srgbDecode(texture2D(tDiffuse, clamp(vUv + off, 0.0, 1.0)).rgb) - 0.10, 0.0);
+          }
+          c += (vacc / 6.0) * veil * 0.22;
+        }
+
+        /* --- emulsion: spectral sensitivity, crosstalk, response ------- */
+        if (fMono > 0.5) {
+          c = vec3(max(dot(c, fSens), 0.0));
+        } else {
+          c = fMat * c;
+        }
+
+        c = pow(max(c, 0.0) / 0.18, vec3(fCon)) * 0.18;
+
+        /* Extended Reinhard: rolls the shoulder off toward fWhite instead
+           of clipping, which is the main thing that separates a film curve
+           from a digital one. */
+        float W = max(fWhite, 1.001);
+        c = c * (1.0 + c / (W * W)) / (1.0 + c);
+
+        if (fMono < 0.5) {
+          float L = dot(c, LUMA);
+          float s = fSat * (1.0 - fSatRoll * smoothstep(0.35, 1.0, L));
+          c = mix(vec3(L), c, max(s, 0.0));
+        }
+
+        c += fLift;
+        outLin = mix(lin, c, filmMix);
+      }
+
+      vec3 col = srgbEncode(outLin);
+
+      /* --- print: split tone, in display space where it is judged by eye,
+         gated the same way as the rest of the film chain — no effect at
+         filmMix 0. */
+      if (filmMix > 0.0) {
+        float L = dot(col, LUMA);
+        vec3 tint = mix(fShTint, fHiTint, smoothstep(0.0, 1.0, L));
+        col = mix(col, col * tint, filmMix);
+      }
 
       /* --- silver: grain last. Size is in OUTPUT PIXELS via gl_FragCoord,
          not scaled with resolution, so the same settings match across
@@ -1491,6 +1698,30 @@ const postMat = new THREE.ShaderMaterial({
         }
         float L = dot(col, LUMA);
         col += nc * grainAmt * mix(0.30, 1.0, clamp(4.0 * L * (1.0 - L), 0.0, 1.0));
+      }
+
+      /* --- film rebate. Applied LAST because it is the negative carrier
+         around the image, not part of what the emulsion recorded — a
+         rounded-box SDF with a noise-perturbed edge, corner radius and a
+         slight tilt. The jitter samples grainField() at t=0, a FIXED
+         coordinate rather than the seed uniform — the border must be static across
+         frames or it shimmers, which is a different failure from grain
+         needing to animate. No effect when there is no frame selected or
+         Border is 0. */
+      if (frAspect > 0.0 && frBorder > 0.0) {
+        vec2 fc = vUv - 0.5;
+        fc.x *= res.x / max(res.y, 1.0);
+        float ta = radians(frTilt);
+        fc = mat2(cos(ta), -sin(ta), sin(ta), cos(ta)) * fc;
+
+        vec2 half2 = vec2(0.5 * frFill * frAspect, 0.5 * frFill);
+        vec2 q = abs(fc) - half2 + frRadius;
+        float dBox = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - frRadius;
+
+        float jit = (grainField(fc * 26.0 + 5.0, 0.0) - 0.5) * frJitter * 0.02;
+        float edge = dBox + jit;
+        float m = smoothstep(0.006, -0.002, edge);
+        col = mix(vec3(0.012, 0.012, 0.014), col, clamp(m, 0.0, 1.0) * frBorder + (1.0 - frBorder));
       }
 
       gl_FragColor = vec4(col, 1.0);
@@ -1523,6 +1754,54 @@ function resizePostTex(w, h) {
   postMat.uniforms.tDiffuse.value = postTex;
   postMat.uniforms.res.value.set(w, h);
 }
+
+/* Profile options generated from FILM_PROFILES rather than hand-written —
+   same reasoning as buildRegionRows(): the id/name pairing is the one
+   source of truth and a hand-duplicated <option> list is where a typo
+   would hide. "None (bypass)" is NOT one of the data profiles — it is the
+   absence of one, and applyFilmProfile() below treats it as a special case
+   rather than a profile with filmMix forced to 0, so Intensity keeps
+   whatever the user last set even while "None" sits selected. */
+for (const p of FILM_PROFILES) {
+  const o = document.createElement("option");
+  o.value = p.id; o.textContent = p.name;
+  $("filmProfile").appendChild(o);
+}
+
+/* Pushes one profile's fixed numeric data into postMat's uniforms. NOT a
+   SPEC parameter and not routed through pushUniforms(): a profile is a
+   discrete choice, not a continuous value with a reset/envelope/audio
+   binding of its own — the same category "dField"/"wMode"/"qAxis" already
+   sit in. Called on <select> change and on preset load; does not need a
+   per-frame path the way updateShaderUniforms() does, since nothing here
+   depends on the camera or playhead. "None" pushes fMono/fSens/fMat/etc.
+   set to inert values (identity matrix, hal 0) — filmMix itself already
+   gates the whole chain to a bypass, so these values are never read at
+   Intensity 0, but leaving them at whatever the LAST real profile set would
+   be a latent trap for the day something reads them before checking
+   filmMix. */
+function applyFilmProfile() {
+  const id = $("filmProfile").value;
+  const p = FILM_PROFILES.find((x) => x.id === id);
+  const u = postMat.uniforms;
+  if (!p) {
+    u.fMono.value = 0;
+    u.fSens.value.set(0.2126, 0.7152, 0.0722);
+    u.fMat.value.identity();
+    u.fCon.value = 1; u.fWhite.value = 4; u.fSat.value = 1; u.fSatRoll.value = 0; u.fLift.value = 0;
+    u.fShTint.value.set(1, 1, 1); u.fHiTint.value.set(1, 1, 1);
+    u.fHal.value = 0; u.fHalTint.value.set(1, 0.4, 0.25);
+    return;
+  }
+  u.fMono.value = p.mono;
+  u.fSens.value.set(...p.sens);
+  u.fMat.value.set(...p.mix);
+  u.fCon.value = p.con; u.fWhite.value = p.white; u.fSat.value = p.sat; u.fSatRoll.value = p.satRoll; u.fLift.value = p.lift;
+  u.fShTint.value.set(...p.shTint); u.fHiTint.value.set(...p.hiTint);
+  u.fHal.value = p.hal; u.fHalTint.value.set(...p.halTint);
+}
+$("filmProfile").onchange = applyFilmProfile;
+applyFilmProfile();
 
 /* Live-view grain seed. A frame counter, not a clock: wrapped at 4096 so
    float precision in the hash stays exact across a long session. Advanced
@@ -2181,7 +2460,10 @@ const SPEC = [
   ["dof", 1, "depth"], ["dofStops", 2, "depth"], ["nearBoost", 2, "depth"], ["pickThresh", 2, "depth"],
   ["smearAmt", 1, "smear"], ["smearAngle", 0, "smear"],
   ["vigAmt", 2, "frame"], ["vigRadius", 2, "frame"], ["vigSoft", 2, "frame"],
+  ["frFill", 3, "frame"], ["frBorder", 2, "frame"], ["frJitter", 2, "frame"],
+  ["frRadius", 3, "frame"], ["frTilt", 2, "frame"],
   ["grainAmt", 3, "grain"], ["grainSize", 1, "grain"], ["grainColor", 2, "grain"],
+  ["filmMix", 2, "film"], ["exposure", 2, "film"], ["halScale", 2, "film"], ["veil", 2, "film"],
   /* Optics — SparkRenderer properties, not dyno uniforms. They ride the same
      SPEC machinery (reset, envelopes, audio routing, presets) and are written
      out by updateOptics() on the same per-frame path as dofFocus/smear. */
@@ -3384,6 +3666,24 @@ function pushUniforms() {
   postMat.uniforms.grainSize.value  = V.grainSize;
   postMat.uniforms.grainColor.value = V.grainColor;
 
+  /* Phase F. exposure is stops -> multiplier, same Math.pow(2, x) convention
+     as splatOpacity in Phase C — the slider stays linear in the perceptually
+     linear unit (stops), the uniform gets the multiplier the shader actually
+     wants. frAspect reads a <select>, not a SPEC slider — structural framing
+     choice, not a continuous value — so it is read from the DOM here rather
+     than from V, the same way dField/wMode/etc. are read elsewhere in this
+     function. */
+  postMat.uniforms.filmMix.value  = V.filmMix;
+  postMat.uniforms.exposure.value = Math.pow(2, V.exposure);
+  postMat.uniforms.halScale.value = V.halScale;
+  postMat.uniforms.veil.value     = V.veil;
+  postMat.uniforms.frAspect.value = parseFloat($("frAspect").value) || 0;
+  postMat.uniforms.frFill.value   = V.frFill;
+  postMat.uniforms.frBorder.value = V.frBorder;
+  postMat.uniforms.frJitter.value = V.frJitter;
+  postMat.uniforms.frRadius.value = V.frRadius;
+  postMat.uniforms.frTilt.value   = V.frTilt;
+
   /* Spark gates the generate pass on `viewChanged || version changed`
      (spark.module.js 2.1.0, ~line 10210). Writing a dyno uniform's .value
      does neither, so without this bump the modifier output stays baked and
@@ -4533,7 +4833,7 @@ const PRESET_VERSION = 6;   // v2 selects; v3 audio; v4 regions+mask; v5 camera 
    sitting at, not of the look. A preset saved on a desktop must not force a
    phone back to full pixel ratio, nor the reverse. */
 const TOGGLES = ["useLod"];
-const SELECTS = ["res", "fps", "obAxis", "bgColor", "dField", "dcMode", "dcAxis", "qAxis", "wMode", "dpMode", "dofFocusSrc"];
+const SELECTS = ["res", "fps", "obAxis", "bgColor", "dField", "dcMode", "dcAxis", "qAxis", "wMode", "dpMode", "dofFocusSrc", "filmProfile", "frAspect"];
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 function serialize() {
@@ -4643,6 +4943,7 @@ function applyPreset(o) {
     if ([...$(id).options].some((opt) => opt.value === v)) $(id).value = v;
   }
   applyBgColor();   // selects loop above only sets the <select>'s value — setClearColor needs an explicit push
+  applyFilmProfile();   // same reasoning — the SELECTS loop sets filmProfile's <select> value but does not push its uniform data
 
   // envelopes: wipe first, so loading is a replace and never a merge
   for (const id of ANIM) {
@@ -5444,6 +5745,7 @@ if (new URLSearchParams(location.search).has("debug")) {
     applyPreset,
     get splatVertexShader(){ return SPLAT_VERTEX_SHADER; },
     postMat, renderWithPost, resizePostTex,
+    applyFilmProfile, FILM_PROFILES,
     get postTex(){ return postTex; },
     get grainFrame(){ return grainFrame; },
     set grainFrame(v){ grainFrame = v; },

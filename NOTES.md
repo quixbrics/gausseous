@@ -3399,6 +3399,172 @@ character, and doesn't share the blind spot. Worth using that instead of an
 ad hoc scanner for any future edit inside a template-literal shader string in
 this file.
 
+
+---
+
+## Optics port, Phase F — film profiles, halation, veil, rebate
+
+`DEV_PLAN_OPTICS_PORT.md`, Phase F, the last phase in the port. Rides on
+Phase E's post-raster pass. Parametric film response, halation vs. veiling
+flare as two genuinely different effects, split toning, and the film rebate.
+Deferred, per the plan: measured LUTs — a `.cube` loader is the honest
+upgrade path and coexists with this parametric chain rather than replacing
+it, since the parametric controls stay animatable per-parameter and a LUT
+does not.
+
+### Profile data ported verbatim, not re-derived
+
+`FILM_PROFILES` — ten looks plus the implicit "None" bypass — is copied
+directly from `Optics/optics.html`'s own `PROFILES` table: `sens`, `mix`,
+`con`, `white`, `sat`/`satRoll`, `lift`, `shTint`/`hiTint`, `hal`/`halTint`
+per profile. These are **numbers**, not behaviour to re-express through
+`SPEC`/`V` — the plan's own validation table marks them "visually
+road-tested" as-is, and hand-tuned constants don't have a "correct"
+independent of the look they were tuned to produce. What changed in the
+port is the **wiring**: a profile is a discrete choice, the same category
+`dField`/`wMode`/`qAxis` already occupy in this file, not a continuous
+`SPEC` slider — so it is a `<select>` populated from `FILM_PROFILES`,
+persisted via `SELECTS`, with `applyFilmProfile()` pushing the chosen
+profile's fixed data into `postMat.uniforms.*` on change and on preset
+load. Four continuous sliders ride on top, in `SPEC` group `film`:
+Intensity (`filmMix`), Exposure, Halation (`halScale`, a *reach* multiplier
+on the profile's own fixed halation strength), and Veiling flare (`veil`,
+independent — no profile defines a veil strength, it is a pure user
+control).
+
+### Intensity 0 is an exact bypass — verified per profile, not just once
+
+The whole film chain (halation, veil, emulsion response, saturation) sits
+inside one `if (filmMix > 0.0)` block in the shader, not gated per-term.
+Verified with **every one of the ten profiles selected in turn**, at
+`filmMix = 0`: all ten produced a render bit-identical to the untouched
+base (`3.1763 / 13.250 / 13.962`) — coverage, mean R and luma exact at every
+digit, for every profile. This is the plan's own instruction taken
+literally: *"Intensity 0 is an exact bypass, not a neutral profile — the
+only honest way to A/B a look."* A "neutral" profile that still ran the
+maths could round differently even at its own identity settings; this
+verifies that isn't happening for any of the ten.
+
+At `filmMix = 1`, every profile **does** move the render, confirmed against
+the same base: coverage and mean R both differ from base for all ten.
+Cross-checked against the profile data itself in three of the four
+black-and-white profiles (`pan`, `ir`, `lith`, whose `shTint`/`hiTint` are
+identity `[1,1,1]`): mean R equals mean luma **exactly** — the defining
+property of a true monochrome image, `0.2126R + 0.7152G + 0.0722B = R` only
+when `R = G = B`. `ortho`'s R and luma differ by 0.06%, and that is
+*correct*, not a leak: `ortho`'s own `shTint`/`hiTint` are `[0.99,1.00,1.02]`
+/ `[1.02,1.01,0.98]` — a deliberate warm/cool split tone layered on a
+monochrome base, exactly as `selen` ("warm tone") also does. Reading the
+per-profile data before asserting "this should be pure grey" is what
+catches the difference between a bug and an intentional toning choice.
+
+### Halation vs. veiling flare — verified as genuinely independent effects
+
+The plan is explicit these are different effects (tight bright-pass ring
+blur vs. wide low-threshold lift) and the rig "conflated them at first."
+Verified independently:
+
+- On the `neutral` profile (`hal = 0` in its own data), sweeping `halScale`
+  0 → 1 → 2 is **bit-identical at every step** — the shader's own
+  `if (fHal > 0.0 && halScale > 0.0)` gate holds; the reach slider has
+  nothing to multiply when the profile defines no halation strength.
+- On `warmneg` (`hal = 0.5`), the same sweep **does** move the render:
+  coverage 3.136 → 3.276 → 3.614 → 4.294 across `halScale` 0 → 0.5 → 1 → 2,
+  monotonic and increasing, matching a bright-pass bloom spreading further
+  as its radius grows.
+- `veil`, swept independently on `neutral` (no profile dependency at all,
+  by design): coverage jumps from base 3.176 to **9.55** at the first
+  nonzero step and keeps climbing gently after — a much larger, broader
+  effect than halation's own sweep, consistent with veiling flare being a
+  wide low-threshold lift across the *whole* frame rather than a bloom
+  localised to bright points.
+
+These are measurably different response shapes to their own sliders, not
+merely two names for the same blur at different radii.
+
+### Vignette formula and rebate SDF, verified against independent CPU references
+
+Same discipline as Phase B/C/D's tilt-pivot and pick-depth checks. Vignette:
+reproduced the exact shader arithmetic in JS (`smoothstep`-shouldered radial
+falloff on aspect-corrected coordinates, applied in true linear light via
+`srgbDecode`/`srgbEncode`) and compared against four read-back pixels —
+frame centre and three off-centre points, `vigAmt=0.6, vigRadius=0.5,
+vigSoft=0.4`: **every sample matched the independently-computed prediction
+exactly**, byte for byte (centre `(8,9,11)`, all three others `(3,4,4)` or
+`(4,5,6)`, predicted and measured identical).
+
+Rebate: reproduced the rounded-box SDF (aspect crop, fill, corner radius,
+no jitter for a clean binary in/out test) in JS and classified four sample
+points — frame centre, two opposite corners, one edge midpoint — as inside
+or outside the frame. **All four matched**: centre read the `void`
+background (inside), the other three read the border colour `~(3,3,4)`
+(outside), exactly as predicted.
+
+### Determinism and the export loop — re-verified after Phase F's own additions
+
+The film chain adds no new per-frame state beyond what Phase E already
+established (`updateShaderUniforms()`/`pushUniforms()` push `postMat`'s
+uniforms; grain's seed discipline is unchanged). A genuine export was run
+with the full chain active — `slide` profile, `filmMix=0.6`, `halScale=1`,
+`veil=0.3`, a square rebate at `frBorder=0.5` — and completed: **24 frames,
+21,683 bytes**. That is a real, successfully muxed file, not a near-empty
+one; it displays as "0.0 MB" purely from the status line's one-decimal
+rounding (`0.0217 MB`), confirmed by capturing the exact blob size rather
+than trusting the rounded string. The file is smaller than Phase E's own
+2.6 MB export because that one had grain active — high-frequency per-pixel
+noise is far harder for the video codec to compress than the smooth film
+response and vignette in this run, which is the expected direction, not a
+regression.
+
+### Full regression sweep and preset round-trip
+
+31-case sweep (every `SPEC` parameter from Phases A through F touched at
+least once), measured against **`window.__bench.settled()`**, which
+bypasses the post pass entirely: every Phase E/F-only case (`vigAmt`,
+`grainAmt`, `filmMix`, `exposure`, `halScale`, `veil`, `frFill`, `frBorder`,
+`frJitter`, `frRadius`, `frTilt`) reads as **no change at all** against the
+raw base — correct and expected, since none of them touch the per-splat
+pipeline `settled()` measures; this is the same bypass discipline Phase E's
+own trap #3 exists to enforce, re-confirmed here rather than assumed still
+in effect after Phase F's shader additions.
+
+Preset: **no version bump.** All fifteen new `SPEC` entries (`filmMix`,
+`exposure`, `halScale`, `veil`, `frFill`, `frBorder`, `frJitter`,
+`frRadius`, `frTilt`, plus `filmProfile`/`frAspect` as additive `SELECTS`
+entries) are additive; v6 stands. Verified: round-trip
+`serialize() -> applyPreset() -> serialize()` byte-exact (modulo `saved`)
+with the `slide` profile, a `0.8` (portrait) rebate aspect, and every new
+slider off its default. `applyFilmProfile()` is confirmed to actually run
+on preset load, not merely set the `<select>`'s displayed value: after
+loading a preset with `filmProfile: "slide"`, `postMat.uniforms.fCon.value`
+reads `1.32` — `slide`'s own contrast exponent — not whatever the previous
+profile (or "None"'s inert identity value) had left behind. A synthetic v6
+file with every Phase F key deleted loads cleanly and keeps the slider's
+and select's current values, the same forgiving-load rule every other
+additive phase in this port follows.
+
+### Frame time
+
+Not measurable at this canvas size and splat count, consistent with every
+earlier phase's own finding: neutral post pass 0.063ms, full chain active
+(profile + halation + veil + vignette + grain + a bordered rebate)
+0.058ms — within noise. Halation and veil are the plan's own named concern
+for mobile (the only per-pixel loops in the chain, 8-tap and 6-tap), but
+that cost only shows up at a canvas size or splat count this rig's
+committed test asset does not reach; recorded as unmeasured here rather
+than assumed fine at every scale.
+
+### This is the last phase in `DEV_PLAN_OPTICS_PORT.md`
+
+Phases A through F are now ported, measured and committed. Two real,
+non-hypothetical bugs were found and fixed along the way that the plan
+itself did not anticipate: swirl's coupling to the wrong blur term (Phase
+C, live from a Phase A default it silently depended on), and the
+render-target color-space/target-dependence pair (Phase E, live from an
+architecture choice the plan's own reference rig also carries and never
+exercised under measurement). Both are documented in full where they were
+found, not just noted as fixed.
+
 ---
 
 ## Section accordion and `SPEC` groups
