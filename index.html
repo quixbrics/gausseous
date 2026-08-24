@@ -514,6 +514,16 @@
       <button type="button" data-mode="keyframes" class="on" title="Camera follows the keyframe path below">Keyframes</button>
       <button type="button" data-mode="orbit" title="Camera follows a generated turntable move">Orbit</button>
     </div>
+    <div class="btns" style="margin-bottom:9px">
+      <button type="button" id="pickPivotToggle" aria-pressed="false" title="Tap the model to orbit around what you tapped, instead of the object's own centre. Works in Manual, Keyframes and Orbit — mouse-drag orbiting and Orbit mode both turn around whatever the pivot currently is.">Pick pivot</button>
+      <button type="button" id="pickPivotReset" title="Put the pivot back on the object's own centre, without touching camera position or framing.">Reset pivot</button>
+    </div>
+    <p style="color:var(--ink-dim); margin:0 0 9px">
+      The pivot is what Orbit turns around and what a mouse-drag orbit is centred
+      on — misaligned pivot is usually why the model and camera feel like they're
+      fighting each other. Picking one does not move the camera; it only changes
+      what future orbiting turns around.
+    </p>
     <div class="row"><label>Ease</label><output id="o-ease">—</output>
       <input type="range" id="p-ease" min="0" max="1" step="0.01" value="0.8"></div>
     <!-- step="any", not 0.5: Audio's "× set" writes an exact multiple of the
@@ -1080,10 +1090,13 @@ const XFORM_DEFAULT = { rotX: 180, rotY: 0, rotZ: 0, posX: 0, posY: 0, posZ: 0, 
 let xform = { ...XFORM_DEFAULT };     // COMMITTED transform; drives the mesh
 let xformEntry = null;                // snapshot on entering Correct, for Cancel
 let correcting = false;
-/* Picked focus (Phase D). Up here with the rest of the module state, not
-   beside its own functions: syncControlsEnabled() near the top reads pickOn,
-   and a `let` below its first reader is exactly the TDZ that killed v1. */
+/* Picked focus (Phase D), and picked pivot (same rig, different target —
+   see setPickMode()'s own comment). Up here with the rest of the module
+   state, not beside its own functions: syncControlsEnabled() near the top
+   reads pickOn, and a `let` below its first reader is exactly the TDZ that
+   killed v1. */
 let pickOn = false;
+let pickTarget = "focus";                  // "focus" | "pivot" — what an armed pick writes to
 let pickCache = null;                      // object-space centres/radii/opacities, built lazily
 let pickedPoint = null;                    // world-space THREE.Vector3, or null
 let prevCamModeForCorrect = null;      // restored on leaving Correct
@@ -3512,6 +3525,7 @@ function enterCorrect() {
   for (const id of ["mdRotX", "mdRotY", "mdRotZ", "mdPosX", "mdPosY", "mdPosZ", "mdScale"]) $("p-" + id).disabled = false;
   $("gestureToggle").disabled = true;
   $("pickToggle").disabled = true;
+  $("pickPivotToggle").disabled = true;
   $("render").disabled = true;
 
   xctl.attach(mesh);
@@ -3534,6 +3548,7 @@ function leaveCorrect() {
   for (const id of ["mdRotX", "mdRotY", "mdRotZ", "mdPosX", "mdPosY", "mdPosZ", "mdScale"]) $("p-" + id).disabled = true;
   $("gestureToggle").disabled = false;
   $("pickToggle").disabled = false;
+  $("pickPivotToggle").disabled = false;
   $("render").disabled = !CAN_EXPORT;
 
   xctl.detach();
@@ -4288,23 +4303,40 @@ function pickDepth(tapX, tapY) {           // CSS pixels, relative to the canvas
   return null;
 }
 
-function setPickMode(on) {
+/* One armed mode, two possible targets. `target` selects what a completed
+   tap DOES with the picked world point — "focus" writes it into
+   updateDofFocus()'s "picked" source (Phase D, unchanged); "pivot" writes it
+   straight into controls.target, which is what Orbit mode and every mouse-
+   drag orbit actually turn around. Sharing the rig (cache, march, threshold)
+   rather than duplicating it: the two differ only in what happens to the
+   result, not in how the result is found. Only one target can be armed at
+   once — arming one disarms the other, same reasoning as Adjust/Correct
+   already not coexisting with either. */
+function setPickMode(on, target = pickTarget) {
   if (on && correcting) return;            // Correct owns the viewport, same rule as Adjust
   if (on) setGesture(false);               // and Adjust and Pick cannot both own a pointerdown
   pickOn = on;
+  pickTarget = target;
   syncControlsEnabled();
   document.body.classList.toggle("picking", on);
-  $("pickToggle").classList.toggle("on", on);
-  $("pickToggle").setAttribute("aria-pressed", String(on));
-  $("pickToggle").textContent = on ? "Picking…" : "Pick focus";
+  const focusBtn = $("pickToggle"), pivotBtn = $("pickPivotToggle");
+  const focusOn = on && pickTarget === "focus", pivotOn = on && pickTarget === "pivot";
+  focusBtn.classList.toggle("on", focusOn);
+  focusBtn.setAttribute("aria-pressed", String(focusOn));
+  focusBtn.textContent = focusOn ? "Picking…" : "Pick focus";
+  pivotBtn.classList.toggle("on", pivotOn);
+  pivotBtn.setAttribute("aria-pressed", String(pivotOn));
+  pivotBtn.textContent = pivotOn ? "Picking…" : "Pick pivot";
+  const label = pickTarget === "pivot" ? "Pick pivot" : "Pick focus";
   if (on && mesh && !pickCache) {
     const c = buildPickCache();
-    if (c) setStatus(`Pick focus armed — cached ${c.n.toLocaleString()} splats in ${c.ms}ms. Tap the model.`);
+    if (c) setStatus(`${label} armed — cached ${c.n.toLocaleString()} splats in ${c.ms}ms. Tap the model.`);
   } else if (on) {
-    setStatus("Pick focus armed — tap the model.");
+    setStatus(`${label} armed — tap the model.`);
   }
 }
-$("pickToggle").onclick = () => setPickMode(!pickOn);
+$("pickToggle").onclick = () => setPickMode(!(pickOn && pickTarget === "focus"), "focus");
+$("pickPivotToggle").onclick = () => setPickMode(!(pickOn && pickTarget === "pivot"), "pivot");
 
 function clearPick() {
   pickedPoint = null;
@@ -4315,6 +4347,23 @@ function clearPick() {
   setStatus("Focus unlocked — back on the pivot.");
 }
 $("pickClear").onclick = clearPick;
+
+/* Puts the pivot back on the object's own centre — the same bounding-sphere
+   centre reframe() computes — WITHOUT touching camera position, near/far or
+   obDist the way reframe() does. A user who has picked a pivot to fix an
+   alignment problem and wants to start over should get exactly that one
+   thing undone, not a full re-frame that also moves the camera they may
+   have since composed by hand. */
+function resetPivot() {
+  if (!mesh) return;
+  mesh.updateMatrixWorld(true);
+  const box = mesh.getBoundingBox(true).applyMatrix4(mesh.matrixWorld);
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  controls.target.copy(sphere.center);
+  controls.update();
+  setStatus("Pivot reset to the model's own centre.");
+}
+$("pickPivotReset").onclick = resetPivot;
 
 renderer.domElement.addEventListener("pointerdown", (ev) => {
   if (!pickOn || !mesh) return;
@@ -4338,8 +4387,23 @@ renderer.domElement.addEventListener("pointerdown", (ev) => {
   ray.setFromCamera(ndc, camera);
   const fwd = camera.getWorldDirection(new THREE.Vector3());
   const t = depth / Math.max(ray.ray.direction.dot(fwd), 1e-4);
-  pickedPoint = ray.ray.origin.clone().addScaledVector(ray.ray.direction, t);
+  const worldPt = ray.ray.origin.clone().addScaledVector(ray.ray.direction, t);
 
+  if (pickTarget === "pivot") {
+    /* Camera position and rotation are left completely untouched — no
+       lookAt, no reposition. OrbitControls derives its internal spherical
+       state (radius/angles) from `camera.position - controls.target` at the
+       START of its own next update(), so the rendered frame does not jump;
+       only what future dragging/Orbit turns around changes. That is the
+       actual fix for "model and camera fighting each other": the pivot was
+       wrong, not the view. */
+    controls.target.copy(worldPt);
+    controls.update();
+    setStatus(`Pivot set at ${depth.toFixed(3)} — Orbit and mouse-drag now turn around that point.`);
+    return;
+  }
+
+  pickedPoint = worldPt;
   $("dofFocusSrc").querySelector('option[value="picked"]').disabled = false;
   $("dofFocusSrc").value = "picked";
   $("pickClear").disabled = false;
@@ -5702,6 +5766,8 @@ if (new URLSearchParams(location.search).has("debug")) {
     get xform(){ return xform; },
     get correcting(){ return correcting; },
     get pickOn(){ return pickOn; },
+    get pickTarget(){ return pickTarget; },
+    resetPivot,
     get pickCache(){ return pickCache; },
     get pickedPoint(){ return pickedPoint; },
     buildPickCache,

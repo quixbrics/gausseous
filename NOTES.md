@@ -3138,6 +3138,103 @@ the same additive-field rule as every other phase in this port. Verified:
 `serialize() -> applyPreset() -> serialize()` byte-exact (modulo `saved`) with
 `pickThresh = 0.63`, and a synthetic v6 file with the key deleted loads
 cleanly and keeps the slider's current value rather than resetting it.
+---
+
+## Picked pivot — reusing Phase D's rig for the orbit centre
+
+Not part of `DEV_PLAN_OPTICS_PORT.md` — a follow-up request after Phase D
+shipped. The complaint was concrete: aligning the model and camera by hand
+felt like fighting the controls, because `controls.target` stayed pinned to
+the object's bounding-sphere centre (set once by `reframe()`) no matter what
+the user was actually looking at. Orbit mode and every mouse-drag orbit both
+turn around `controls.target` — see `sampleOrbit()`'s own comment, "Orbit
+centres on controls.target and reads it LIVE" — so a pivot that doesn't match
+the subject is not a cosmetic annoyance, it is the actual mechanism behind
+"the model and camera feel like they're fighting each other."
+
+**Reused Phase D's picking rig rather than building a second one.**
+`pickDepth()`/`buildPickCache()`/the front-to-back alpha march are identical
+either way; the two pick modes differ only in what a successful tap *does*
+with the resulting world point. `setPickMode(on, target)` now takes a second
+argument, `"focus"` or `"pivot"`, and the shared `pointerdown` handler
+branches on it at the very end, after the point is found — one rig, one
+cache, two consumers. Module state gained one `let pickTarget` alongside the
+existing `pickOn`, hoisted to the same top-of-file block for the same reason
+`pickOn` itself is there (`syncControlsEnabled()` reads it before its own
+declaration would otherwise exist).
+
+### No camera reposition — verified as genuinely negligible, not assumed
+
+`controls.target.copy(worldPt); controls.update();` and nothing else.
+Deliberately **not** `camera.lookAt()` or any repositioning: OrbitControls
+derives its internal spherical state (radius, theta, phi) from
+`camera.position - controls.target` at the start of its own next `update()`
+call, so changing only the target and then calling `update()` reproduces the
+*same* camera position from the *new* offset — the rendered frame does not
+jump, only what future dragging orbits around changes. That is the intended
+behaviour, not an oversight: the view the user has already composed is
+exactly what a pivot fix should leave alone.
+
+Verified directly rather than assumed from the OrbitControls source: camera
+position before and after a pivot pick differed by **4.6 × 10⁻¹⁶** — pure
+floating-point round-trip noise through the offset → spherical → offset
+conversion, meaningless at any scale this file measures anything else at.
+
+### The actual fix, verified with a real drag, not just a target write
+
+Confirming `controls.target` moves is necessary but not sufficient — the
+claim is that *dragging* now orbits around the new point. Simulated a real
+pointerdown → pointermove → pointerup drag sequence after picking a pivot on
+the flower's centre: `controls.target` was **unchanged by the drag** (still
+sat exactly on the picked point, distance `< 1e-9`), and the camera held a
+consistent **2.69** units from that pivot throughout — the drag rotated the
+camera around the picked point, not around the object's old centre. This is
+the property that actually matters and the one a target-write alone doesn't
+prove.
+
+### Reset, and why it is not just calling `reframe()`
+
+"Reset pivot" recomputes the same bounding-sphere centre `reframe()` uses,
+but **does not** touch camera position, near/far, or `obDist`'s own default
+the way `reframe()` does. A user who picked a pivot to fix an alignment
+problem and wants to undo *that one thing* should get exactly that back, not
+a full re-frame that also discards camera work they may have done since.
+Verified: the recomputed centre matches the box's own midpoint exactly, and
+also matches the pivot `reframe()` itself set on load — same bounding sphere,
+computed the same way, deliberately kept as a second small function rather
+than factored to share code with `reframe()`, since the two now have
+genuinely different jobs (one recentres a pivot only, the other refits the
+whole camera).
+
+### Mode interlocks — a fourth case through the existing machinery, not a new one
+
+Picked pivot joins Adjust, Correct and Picked focus as a fourth mode that can
+claim the canvas's own `pointerdown`, and it goes through the *same* choke
+points rather than adding parallel ones:
+
+- Arming Pick pivot while Pick focus is armed **switches the target in
+  place** — one call to `setPickMode`, not a race between two independent
+  flags — verified: `pickOn` stays `true` throughout, `pickTarget` flips from
+  `"pivot"` to `"focus"`, and exactly one of the two toggle buttons shows
+  `.on` at any moment.
+- `setGesture(true)` turns Pick pivot off, same call already used for Pick
+  focus.
+- `enterCorrect()`/`leaveCorrect()` disable/re-enable the pivot toggle
+  alongside the focus one, on the same `for (const id of [...])` lines.
+
+All three transitions verified live, not inferred from reading the code.
+
+### Preset
+
+**Not persisted, and deliberately so** — same reasoning Phase D gives for
+`pickedPoint` itself: it is cache-derived and capture-specific, so saving it
+would mean either serialising a world point that means nothing against a
+different capture, or silently dropping it on load. `controls.target`
+already isn't in the preset format for the same reason camera keyframes
+aren't captured across different loads — see NOTES "Camera keyframes",
+"meaningless, possibly wildly out of frame, against a different capture."
+Picking a pivot is a same-session convenience, not part of a look.
+
 
 ## Optics port, Phase E — post-raster pass
 
