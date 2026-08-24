@@ -846,6 +846,28 @@
       <input type="range" id="p-smearAngle" min="0" max="180" step="1" value="0"></div>
   </details>
 
+  <details class="mod" data-group="frame">
+    <summary>Frame <em>vignette</em><i class="gflag"></i></summary>
+    <p style="color:var(--ink-dim); margin:0 0 8px">A fullscreen pass over the finished render, not a per-splat effect — darkens toward the edges in linear light, so it behaves like lost light rather than revealing the background through a translucent cloud. No effect at Amount 0.</p>
+    <div class="row"><label>Amount</label><output id="o-vigAmt">—</output>
+      <input type="range" id="p-vigAmt" min="0" max="1" step="0.01" value="0"></div>
+    <div class="row"><label>Radius</label><output id="o-vigRadius">—</output>
+      <input type="range" id="p-vigRadius" min="0.1" max="1.6" step="0.01" value="0.65"></div>
+    <div class="row"><label>Softness</label><output id="o-vigSoft">—</output>
+      <input type="range" id="p-vigSoft" min="0.05" max="1.5" step="0.01" value="0.75"></div>
+  </details>
+
+  <details class="mod" data-group="grain">
+    <summary>Grain <em>post pass</em><i class="gflag"></i></summary>
+    <p style="color:var(--ink-dim); margin:0 0 8px">Simulated film grain in the finished image, sized in output pixels so a setting matches across export resolutions. Re-randomised every frame rather than translated, so it reads as grain rather than a sliding texture. No effect at Amount 0.</p>
+    <div class="row"><label>Amount</label><output id="o-grainAmt">—</output>
+      <input type="range" id="p-grainAmt" min="0" max="0.5" step="0.005" value="0"></div>
+    <div class="row"><label>Size (px)</label><output id="o-grainSize">—</output>
+      <input type="range" id="p-grainSize" min="0.5" max="14" step="0.5" value="3"></div>
+    <div class="row"><label>Colour</label><output id="o-grainColor">—</output>
+      <input type="range" id="p-grainColor" min="0" max="1" step="0.01" value="0"></div>
+  </details>
+
   <details class="mod" data-group="audio">
     <summary>Audio <em>fft drive</em><i class="gflag"></i></summary>
     <div class="btns" style="margin-bottom:9px">
@@ -1279,6 +1301,238 @@ const spark = new SparkRenderer({
 });
 scene.add(spark);
 
+/* ------------------------------------------------------------------ *
+ * Post-raster pass — Phase E of DEV_PLAN_OPTICS_PORT.md.
+ *
+ * The first effects in this file that are not per-splat: one fullscreen quad
+ * through one fragment shader, drawn OVER the already-rendered splat frame —
+ * roughly the smallest thing that can hold a vignette now and the rest of
+ * Phase F's chain (halation, veil, film response, split tone, grain, rebate)
+ * later without a second architecture.
+ *
+ * THREE TRAPS, per the plan, and this section exists specifically to avoid
+ * all three:
+ *
+ * 1. NEVER a CSS overlay. `VideoFrame(canvas)` — the export path's own
+ *    capture mechanism, below — reads the WebGL drawing buffer only. A CSS
+ *    filter or an HTML overlay would look right in the live preview and
+ *    vanish from every export, silently.
+ *
+ * 2. THE EXPORT LOOP MUST RENDER THROUGH THE PASS. The final draw still
+ *    targets the canvas (VideoFrame needs that), but the offline loop has to
+ *    run both renders, not just the splat one. See the render loop below.
+ *
+ * 3. `window.__bench` MUST BYPASS THE PASS ENTIRELY during probes, restoring
+ *    afterwards. Every coverage/luma figure in NOTES is a pixel count
+ *    against a known backdrop; a vignette or grain running during a probe
+ *    would produce confident nonsense — the same shape of trap as the
+ *    background-colour guard already documented, and it uses the identical
+ *    save/restore discipline. `draw()`/`settled()` below call
+ *    `renderer.render(scene, camera)` directly, never `renderWithPost()`.
+ *
+ * NOT an offscreen WebGLRenderTarget for the splat pass, despite that being
+ * the textbook post-processing pattern (and Optics/optics.html's own
+ * approach). Measured, not assumed: rendering Spark's scene into an
+ * arbitrary WebGLRenderTarget — same camera, same frame, every uniform
+ * verified identical — produced a DIFFERENT composite than rendering it to
+ * the canvas: mean R 8% higher on a dense capture, 28% higher on a sparse
+ * one (cullA 0.85, ruling out overlap/blend accumulation as the cause, since
+ * a sparse non-overlapping subset showed the LARGER deviation). Tracing it
+ * into `onBeforeRender()` in spark.module.js shows the reason: Spark derives
+ * `renderSize` from `spark.target ? {spark.target.width/height} :
+ * renderer.getDrawingBufferSize()` — its OWN notion of "target", distinct
+ * from whatever `renderer.setRenderTarget()` is currently bound to — and
+ * evidently more of its per-frame state assumes it is drawing to the
+ * renderer's actual canvas. Reproducing that assumption exactly was not
+ * worth the risk of a second, subtler mismatch; sidestepping it entirely is
+ * safer and is the reason for the approach below.
+ *
+ * Instead: render the scene to the canvas exactly as before Phase E existed
+ * — the one path already proven correct across every earlier phase's own
+ * measurements — then `renderer.copyFramebufferToTexture()` snapshots
+ * those EXACT bytes into a `FramebufferTexture`, and the post quad draws
+ * from that snapshot back onto the same canvas. Spark never sees anything
+ * but the canvas, ever; nothing about its internal target-detection can
+ * diverge, because there is no second target for it to diverge against. */
+let postTex = new THREE.FramebufferTexture(2, 2);
+const postScene = new THREE.Scene();
+const postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const postMat = new THREE.ShaderMaterial({
+  uniforms: {
+    tDiffuse: { value: postTex }, res: { value: new THREE.Vector2(2, 2) },
+    vigAmt: { value: 0 }, vigRadius: { value: 0.65 }, vigSoft: { value: 0.75 },
+    grainAmt: { value: 0 }, grainSize: { value: 3 }, grainColor: { value: 0 }, seed: { value: 0 },
+  },
+  vertexShader: `varying vec2 vUv;
+    void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  /* Chain order, physical and fixed, per the plan — this phase implements
+     lens (vignette) and silver (grain); base/emulsion/print land in Phase F
+     between the two comment markers below, without reordering either end:
+
+       lens      vignette          (in linear — it is lost light)
+       base      halation, veil    (Phase F — scattering, added as light)
+       emulsion  film response     (Phase F)
+       encode    to display
+       print     split tone        (Phase F)
+       silver    grain             (last)
+
+     The film maths (Phase F) runs in linear, hence the decode at the top and
+     the encode partway through, at the "encode" stage in the table above —
+     see srgbDecode()/srgbEncode() below and NOTES "Post pass colour space"
+     for why both are the real sRGB curve, not a gamma approximation, and
+     for the measurement that found the approximation insufficient. */
+  fragmentShader: `
+    precision highp float;
+    varying vec2 vUv;
+    uniform sampler2D tDiffuse; uniform vec2 res;
+    uniform float vigAmt, vigRadius, vigSoft;
+    uniform float grainAmt, grainSize, grainColor, seed;
+
+    const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+
+    /* 3D hash. The third coordinate is the frame index, so each frame is an
+       INDEPENDENT noise field rather than the same field translated.
+       Animating grain by offsetting the sample position looks like a
+       texture sliding across the frame, not like grain — the field itself
+       must be re-randomised. Measured bug, not a hypothetical one; see
+       NOTES "Grain — two bugs already paid for". */
+    float h31(vec3 p){
+      p = fract(p * 0.1031);
+      p += dot(p, p.zyx + 31.32);
+      return fract((p.x + p.y) * p.z);
+    }
+
+    /* Smoothly interpolated value noise. A floor()-quantised hash gives hard
+       square cells that read as a digital mosaic; interpolation plus a
+       second octave gives irregular clumps instead. */
+    float vnoise(vec2 p, float t){
+      vec2 i = floor(p), f = fract(p);
+      f = f * f * (3.0 - 2.0 * f);
+      float a = h31(vec3(i, t)),                   b = h31(vec3(i + vec2(1.0, 0.0), t));
+      float c = h31(vec3(i + vec2(0.0, 1.0), t)),  d = h31(vec3(i + vec2(1.0, 1.0), t));
+      return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    }
+
+    /* Both octaves sampled on rotated lattices, at unrelated angles. An
+       axis-aligned lattice at an integer pixel period beats against the
+       pixel grid and the display's own downscale, which is the actual
+       source of a regular weave — rotating breaks the alignment, and using
+       two different angles stops the octaves reinforcing each other's
+       grid. */
+    const mat2 GR1 = mat2( 0.8912, -0.4536,  0.4536, 0.8912);
+    const mat2 GR2 = mat2( 0.6235, -0.7818,  0.7818, 0.6235);
+    float grainField(vec2 p, float t){
+      return vnoise(GR1 * p, t) * 0.62
+           + vnoise(GR2 * p * 2.17 + 19.0, t + 71.0) * 0.38;
+    }
+
+    /* Real sRGB EOTF/OETF pair, piecewise (linear segment below the usual
+       breakpoints, power curve above) — NOT a pow(2.2)/pow(1/2.2)
+       approximation. tDiffuse is a raw copy of the canvas's own drawing
+       buffer (see renderWithPost's own comment for why it is a copy and
+       not a render-to-target), so the sampled colour below is an exact
+       display-referred byte with no colour-space tagging or hardware auto-
+       decode anywhere in the path — both halves of the round trip are this
+       shader's own job, done explicitly, rather than one half happening
+       for free in hardware and the other needing to guess at it. A
+       pow(2.2)-family approximation was tried and measurably does not
+       round-trip exactly: it left a drift concentrated in the shadows,
+       where the real curve's linear segment and a pure power curve diverge
+       most — the real curve is exact to the tested byte, verified. */
+    vec3 srgbDecode(vec3 c) {
+      vec3 lo = c / 12.92;
+      vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
+      return mix(lo, hi, step(vec3(0.04045), c));
+    }
+    vec3 srgbEncode(vec3 c) {
+      c = clamp(c, 0.0, 1.0);
+      vec3 lo = c * 12.92;
+      vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+      return mix(lo, hi, step(vec3(0.0031308), c));
+    }
+
+    void main(){
+      vec3 src = texture2D(tDiffuse, vUv).rgb;
+      vec3 lin = srgbDecode(src);
+
+      /* --- lens: vignette, in linear so it behaves like lost light ----
+         Aspect-corrected radial falloff, smoothstep-shouldered rather than
+         a hard edge. This is the road-tested shape from Optics/optics.html,
+         ported as behaviour rather than re-derived from the plan's own
+         "cos^4-style" description — see NOTES for why the two read the same
+         to the eye and the code is the one that was actually driven. */
+      if (vigAmt > 0.0) {
+        vec2 dv = (vUv - 0.5) * 2.0;
+        dv.x *= res.x / max(res.y, 1.0);
+        lin *= clamp(1.0 - vigAmt * smoothstep(vigRadius, vigRadius + vigSoft, length(dv)), 0.0, 1.0);
+      }
+
+      vec3 col = srgbEncode(lin);
+
+      /* --- silver: grain last. Size is in OUTPUT PIXELS via gl_FragCoord,
+         not scaled with resolution, so the same settings match across
+         export sizes. Amplitude peaks in midtones and floors at 0.30 rather
+         than reaching zero — film grain falls off toward white but does not
+         vanish, and a curve reaching zero makes highlights read as clean
+         digital. */
+      if (grainAmt > 0.0) {
+        vec2 gp = gl_FragCoord.xy / max(grainSize, 0.25);
+        float n = grainField(gp, seed) - 0.5;
+        vec3 nc = vec3(n);
+        if (grainColor > 0.0) {
+          /* Decorrelate channels through the hash's own third coordinate,
+             not by offsetting position — a spatial offset would make the
+             three channels the same field displaced, which reads as colour
+             fringing rather than grain. */
+          vec3 rgbN = vec3(grainField(gp, seed + 37.0),
+                           grainField(gp, seed + 91.0),
+                           grainField(gp, seed + 149.0)) - 0.5;
+          nc = mix(vec3(n), rgbN, grainColor);
+        }
+        float L = dot(col, LUMA);
+        col += nc * grainAmt * mix(0.30, 1.0, clamp(4.0 * L * (1.0 - L), 0.0, 1.0));
+      }
+
+      gl_FragColor = vec4(col, 1.0);
+    }`,
+  depthTest: false, depthWrite: false,
+});
+postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat));
+
+/* The only place this app renders to the canvas through the post pass.
+   Scene -> canvas exactly as every phase before this one already does,
+   then a snapshot of those exact drawing-buffer bytes into `postTex` via
+   copyFramebufferToTexture(), then the post quad -> the same canvas,
+   reading that snapshot. Never called from window.__bench — see the trap
+   note above this section. */
+function renderWithPost() {
+  renderer.setRenderTarget(null);
+  renderer.render(scene, camera);
+  renderer.copyFramebufferToTexture(postTex);
+  renderer.render(postScene, postCam);
+}
+
+/* postTex has no setSize() — a FramebufferTexture is sized once at
+   construction, so a resize means dispose the old one and build a fresh one
+   at the new dimensions, then repoint postMat at it. Pulled out of resize()
+   itself because the export path (below) needs the exact same dance at a
+   different, fixed size. */
+function resizePostTex(w, h) {
+  postTex.dispose();
+  postTex = new THREE.FramebufferTexture(w, h);
+  postMat.uniforms.tDiffuse.value = postTex;
+  postMat.uniforms.res.value.set(w, h);
+}
+
+/* Live-view grain seed. A frame counter, not a clock: wrapped at 4096 so
+   float precision in the hash stays exact across a long session. Advanced
+   once per rendered frame in frame() below, REGARDLESS of Play/Pause — grain
+   is a property of the viewfinder, not the timeline, and freezing it while
+   paused would read as a rendering fault rather than a still frame.
+   The export loop below does NOT read this counter — it seeds from its own
+   frame index for the determinism reason explained there. */
+let grainFrame = 0;
+
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
@@ -1349,12 +1603,20 @@ function resize() {
      controls.target (set before the NaN line), which reads like a Spark
      failure rather than an aspect-ratio one. */
   const w = Math.max(stage.clientWidth, 1), h = Math.max(stage.clientHeight, 1);
-  renderer.setPixelRatio(effDpr());
+  const dprNow = effDpr();
+  renderer.setPixelRatio(dprNow);
   renderer.setSize(w, h, false);
   renderer.domElement.style.width = w + "px";
   renderer.domElement.style.height = h + "px";
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  /* The post-pass snapshot texture tracks the renderer's OWN drawing-buffer
+     size, not the CSS size — pixel ratio scales one and not the other, and
+     grain size is specified in output pixels, so postMat.uniforms.res must
+     agree with whatever gl_FragCoord actually ranges over or grain looks a
+     different size at different pixel ratios. */
+  const pw = Math.max(2, Math.round(w * dprNow)), ph = Math.max(2, Math.round(h * dprNow));
+  resizePostTex(pw, ph);
   showDpr();
   /* Deliberately NOT calling laneFit() here. resize() runs during module
      evaluation, well before the lane's consts exist — calling it would throw
@@ -1918,6 +2180,8 @@ const SPEC = [
      the whole section, which is what the collapsed title should report. */
   ["dof", 1, "depth"], ["dofStops", 2, "depth"], ["nearBoost", 2, "depth"], ["pickThresh", 2, "depth"],
   ["smearAmt", 1, "smear"], ["smearAngle", 0, "smear"],
+  ["vigAmt", 2, "frame"], ["vigRadius", 2, "frame"], ["vigSoft", 2, "frame"],
+  ["grainAmt", 3, "grain"], ["grainSize", 1, "grain"], ["grainColor", 2, "grain"],
   /* Optics — SparkRenderer properties, not dyno uniforms. They ride the same
      SPEC machinery (reset, envelopes, audio routing, presets) and are written
      out by updateOptics() on the same per-frame path as dofFocus/smear. */
@@ -3106,6 +3370,20 @@ function pushUniforms() {
     U.maskInv[key].value  = MASK[key].invert ? 1 : 0;
   }
 
+  /* Post pass (Phase E). Plain THREE.ShaderMaterial uniforms, not dyno — no
+     bake/gate mechanism, no mesh.updateVersion() needed, and (unlike
+     updateShaderUniforms()'s spark.material.uniforms.*) nothing here depends
+     on the camera, so there is no need for a dedicated every-rendered-frame
+     path either: these only change when pushUniforms() itself runs, which
+     is exactly what already happens on a slider edit, a playhead advance, or
+     an envelope/audio update during playback. */
+  postMat.uniforms.vigAmt.value     = V.vigAmt;
+  postMat.uniforms.vigRadius.value  = V.vigRadius;
+  postMat.uniforms.vigSoft.value    = V.vigSoft;
+  postMat.uniforms.grainAmt.value   = V.grainAmt;
+  postMat.uniforms.grainSize.value  = V.grainSize;
+  postMat.uniforms.grainColor.value = V.grainColor;
+
   /* Spark gates the generate pass on `viewChanged || version changed`
      (spark.module.js 2.1.0, ~line 10210). Writing a dyno uniform's .value
      does neither, so without this bump the modifier output stays baked and
@@ -3976,7 +4254,9 @@ function frame(now) {
   updateDofFocus();
   updateShaderUniforms();
   updateOptics();
-  renderer.render(scene, camera);
+  postMat.uniforms.seed.value = grainFrame;
+  grainFrame = (grainFrame + 1) % 4096;
+  renderWithPost();
 }
 
 /* ------------------------------------------------------------------ *
@@ -4125,6 +4405,13 @@ $("render").onclick = async () => {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    /* The post-pass snapshot texture must match the FIXED export
+       resolution, not whatever the live viewport happened to be — same
+       reasoning as the drawing-buffer resize above, at pixel ratio 1 since
+       VideoFrame reads the drawing buffer at its own native size. resize()
+       in the `finally` block below restores this to the viewport's own
+       size afterwards. */
+    resizePostTex(w, h);
 
     /* Pre-existing gap, found while testing Phase 5 (not something it
        introduced — Keyframes mode reproduces it identically): exporting
@@ -4149,6 +4436,15 @@ $("render").onclick = async () => {
       updateDofFocus();
       updateShaderUniforms();
       updateOptics();
+      /* Seed from the EXPORT frame counter (`i`), never the live
+         `grainFrame` — two renders of the same export frame must be
+         bit-identical or the determinism guarantee this project protects
+         everywhere else (Phase 4's uniform, the audio shaping cache, camera
+         keyframe sampling) breaks here specifically. `grainFrame` keeps
+         advancing on whatever the live view happens to be doing during an
+         export and reading it here would make the exported grain depend on
+         real time, not on which frame is being encoded. */
+      postMat.uniforms.seed.value = i % 4096;
 
       /* Spark sorts splats asynchronously off a GPU readback, so a frame
          rendered straight after a camera move can blend in stale order.
@@ -4157,11 +4453,19 @@ $("render").onclick = async () => {
          this loop used to approximate by sleeping. (In 2.1.0 the renderer IS
          the viewpoint — it owns driveSort/sorting directly; there is no
          separate SparkViewpoint instance to reach through.) `settle` remains
-         as an extra manual wait, now defaulting to 0. */
-      renderer.render(scene, camera);
+         as an extra manual wait, now defaulting to 0.
+
+         Both renders go through the post pass, not just the second: trap #2
+         from the plan is "the offline loop must render through the pass",
+         and the first render here exists only to kick off Spark's async sort
+         — routing it through renderWithPost() too costs one throwaway
+         off-screen blit and keeps this loop doing the exact same two-step
+         draw the live view does, rather than a special raw-then-post
+         sequence that only looks equivalent. */
+      renderWithPost();
       await spark.update({ scene, camera });
       if (P.settle > 0) await sleep(P.settle);
-      renderer.render(scene, camera);
+      renderWithPost();
 
       const vf = new VideoFrame(renderer.domElement, {
         timestamp: Math.round((i * 1e6) / fps),
@@ -5139,6 +5443,10 @@ if (new URLSearchParams(location.search).has("debug")) {
     serialize,
     applyPreset,
     get splatVertexShader(){ return SPLAT_VERTEX_SHADER; },
+    postMat, renderWithPost, resizePostTex,
+    get postTex(){ return postTex; },
+    get grainFrame(){ return grainFrame; },
+    set grainFrame(v){ grainFrame = v; },
     buildSplatVertexShader,
     SHADER_ANCHORS,
     spark,

@@ -3139,6 +3139,266 @@ the same additive-field rule as every other phase in this port. Verified:
 `pickThresh = 0.63`, and a synthetic v6 file with the key deleted loads
 cleanly and keeps the slider's current value rather than resetting it.
 
+## Optics port, Phase E — post-raster pass
+
+`DEV_PLAN_OPTICS_PORT.md`, Phase E. The first effects in this file that are
+not per-splat: one fullscreen quad through one fragment shader, drawn over
+the already-rendered frame. This phase implements the pass mechanism itself,
+vignette, and grain; Phase F rides on top with film response, halation, veil
+and the rebate.
+
+### The scene is NOT rendered into an offscreen `WebGLRenderTarget`
+
+The textbook post-processing pattern — and `Optics/optics.html`'s own
+approach — renders the splat scene into an offscreen render target, then
+draws a post quad from that target to the canvas. **Measured, this produces
+a different image than rendering straight to the canvas**, same camera, same
+frame, every uniform verified identical: mean R **8% higher** on the dense
+daffodil capture, **28% higher** on a sparse, non-overlapping subset (`cullA
+= 0.85`) — the sparse figure ruling out blend-accumulation-over-overlapping-
+splats as the cause, since a non-overlapping subset showed the *larger*
+deviation, not a smaller one.
+
+Traced into `spark.module.js`'s own `onBeforeRender()`:
+
+```js
+if (spark.target) {
+  spark.renderSize.set(spark.target.width, spark.target.height);
+} else {
+  renderer.getDrawingBufferSize(spark.renderSize);
+  ...
+}
+```
+
+Spark has its **own** notion of "target" (`spark.target`), distinct from
+whatever `renderer.setRenderTarget()` happens to be bound to, and evidently
+more of its per-frame state assumes it is drawing to the renderer's actual
+canvas than just this one branch. Reproducing that assumption exactly —
+finding and matching every place Spark's internals diverge for an
+arbitrary target — was judged not worth the risk of a second, subtler
+mismatch discovered later, possibly after this had already shipped.
+
+**The fix: don't give Spark a second target to diverge against.** The scene
+renders to the canvas exactly as it always has — the one path already proven
+correct across every measurement in Phases A through D — and
+`renderer.copyFramebufferToTexture()` snapshots those exact drawing-buffer
+bytes into a `THREE.FramebufferTexture` afterward. The post quad reads from
+that snapshot and draws back onto the same canvas. Spark never sees anything
+but the canvas, ever; there is no second render path for its internals to
+disagree with.
+
+```js
+function renderWithPost() {
+  renderer.setRenderTarget(null);
+  renderer.render(scene, camera);
+  renderer.copyFramebufferToTexture(postTex);
+  renderer.render(postScene, postCam);
+}
+```
+
+**Verified exact after the fix**, both dense and the earlier-failing sparse
+case:
+
+| | coverage | mean R | luma |
+|---|---|---|---|
+| dense, raw vs. through-post | 3.1763 / 3.1763 | 13.250 / 13.250 | 13.962 / 13.962 |
+| sparse (`cullA=0.85`), raw vs. through-post | 3.1033 / 3.1033 | 12.709 / 12.709 | — |
+
+Bit-identical, both cases, at every digit.
+
+### Post pass colour space — the bug the render-target approach also had, independently
+
+Before abandoning the render-target approach, a **second, separate** bug was
+found and is worth recording because it will recur the moment Phase F (or
+anything else) samples a texture that carries `SRGBColorSpace`: WebGL
+performs the sRGB decode **in hardware, on every `texture2D()` fetch**, for
+any texture tagged that way — not merely as a label three.js reads
+elsewhere. A passthrough shader with **zero** gamma math
+(`gl_FragColor = texture2D(tDiffuse, vUv)`) still measurably darkened the
+`void` background from `(8, 9, 11)` to `(1, 1, 1)`, proving the decode
+happens whether the shader accounts for it or not.
+
+The fix, now applied in the final (canvas-snapshot) shader rather than the
+abandoned render-target one, is a **real sRGB EOTF/OETF pair**, not a
+`pow(2.2)`/`pow(1/2.2)` approximation:
+
+```glsl
+vec3 srgbDecode(vec3 c) {
+  vec3 lo = c / 12.92;
+  vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
+  return mix(lo, hi, step(vec3(0.04045), c));
+}
+vec3 srgbEncode(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  vec3 lo = c * 12.92;
+  vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+  return mix(lo, hi, step(vec3(0.0031308), c));
+}
+```
+
+Measured, `pow(1/2.2)` in place of the real OETF left a visible drift
+concentrated in the shadows — the `void` background round-tripped to
+`(17, 17, 19)` rather than the exact `(8, 9, 11)` — because the real sRGB
+curve has a linear segment below its breakpoint and a pure power curve does
+not; the two diverge most exactly where a `void` background sits. The real
+curve round-trips **exact to the tested byte**. Both halves are applied
+explicitly in the final shader (decode on read, encode after the vignette
+step) since `postTex` (a `FramebufferTexture`, untagged) carries no implicit
+hardware conversion either way — unlike the abandoned render-target version,
+neither half is "free."
+
+### Vignette — verified against an independent CPU reference, not just self-consistency
+
+```glsl
+vec2 dv = (vUv - 0.5) * 2.0;
+dv.x *= res.x / max(res.y, 1.0);
+lin *= clamp(1.0 - vigAmt * smoothstep(vigRadius, vigRadius + vigSoft, length(dv)), 0.0, 1.0);
+```
+
+This is the road-tested shape from `Optics/optics.html`, ported as **behaviour**
+rather than re-derived from the plan's own "cos⁴-style radial falloff"
+description. The two are not the same formula — this is a `smoothstep`-
+shouldered aspect-corrected radial falloff, not a literal `cos⁴(θ)` law — but
+the plan's own reference implementation is the smoothstep version, already
+visually road-tested, and the plan's instruction is to port *behaviour*
+through `SPEC`/`V`/`pushUniforms()`, not to re-derive a new formula from a
+one-line description of what the old one approximates. Recorded as a
+deliberate choice, same shape of decision as `dofToAngle` versus a literal
+f-number in Phase B.
+
+Verified by reproducing the exact shader arithmetic in JS and comparing
+against read-back pixels at four points (frame centre, two opposite corners,
+one off-axis point), `vigAmt=0.6, vigRadius=0.5, vigSoft=0.4`: **every sample
+matched the independently-computed prediction exactly**, byte for byte —
+e.g. centre `(8,9,11)` predicted and measured identically (inside the
+un-vignetted radius), corners `(3,4,4)` predicted and measured identically.
+
+`vigAmt=0` is bit-identical to the pass being absent entirely (see the
+render-target-vs-canvas table above — that comparison was taken at `vigAmt`
+and `grainAmt` both 0). Coverage as a metric breaks down once vignette is
+active — expected, not a bug in the metric's application elsewhere: vignette
+darkens the whole frame including background pixels away from the reference
+corner, so a naive "differs from the corner pixel" coverage count balloons
+(3.18% → 35–61% across the swept range) purely from background pixels
+themselves no longer being uniform. Mean R is the meaningful readout here and
+moves monotonically with `vigAmt` (13.250 → 9.159 across 0 → 1) and with
+`vigRadius` in the expected direction (a *larger* radius pushes the falloff
+further out, so R rises back toward the un-vignetted value: 8.702 → 10.745 →
+12.641 across radius 0.2 → 0.65 → 1.2).
+
+### Grain — determinism verified directly, not assumed from the seed plumbing
+
+Re-randomised per frame via a third hash coordinate (the frame/seed index),
+not translated — translating the sample position slides the same field
+across the frame and reads as banding, the exact bug this project's own
+audio-shaping work independently rediscovered in a different context and is
+guarded against here from the start. Both octaves sampled on rotated
+lattices at unrelated angles, so neither beats against the pixel grid or
+against the other octave.
+
+**Two renders of the same seed are bit-identical; two different seeds
+genuinely differ.** Measured directly, not inferred: rendering the same
+frame twice at `seed=5` produced **byte-for-byte identical output**
+(2,135,680 of 2,135,680 bytes matched); rendering once at `seed=5` and once
+at `seed=6` differed in **69% of bytes** — proof the field is a real
+independent re-randomisation each seed, not a near-no-op.
+
+Amplitude floors at 0.30 in the shadows rather than reaching zero — film
+grain falls off toward white but does not vanish, and a curve reaching zero
+at the highlights would read as clean digital there. Colour decorrelates the
+three channels through the hash's own third coordinate (not a spatial
+offset, which would read as fringing rather than grain).
+
+### Live-view seed vs. export seed — two different counters, on purpose
+
+`grainFrame`, a module-level counter wrapped at 4096, advances once per
+rendered frame in the live loop **regardless of Play/Pause** — grain is a
+property of the viewfinder, not the timeline, and freezing it while paused
+would read as a rendering fault rather than a still frame.
+
+The export loop does **not** read `grainFrame`. It seeds from its own frame
+index `i % 4096` instead:
+
+```js
+postMat.uniforms.seed.value = i % 4096;
+```
+
+**Seeding export from the live counter would make the exported grain depend
+on real time** — how long the live view happened to be running before Render
+was clicked — rather than on which frame is being encoded, breaking the
+export-determinism guarantee this project protects everywhere else (Phase
+4's camera uniform, the audio-shaping cache, camera-keyframe sampling). Two
+renders of the same *export* frame are bit-identical by the same test above,
+since the export loop deterministically derives its seed from `i` alone.
+
+### The export loop renders through the pass — verified with a real export, not a simulation
+
+A genuine 24-frame export (1280×720, 24fps, `vigAmt=0.3`, `grainAmt=0.2`) was
+run through the actual `$("render").onclick` handler, not a mock: **completed
+successfully, 2.6 MB, status "Rendered 24 frames".** `postTex`/`postMat.uniforms.res`
+correctly tracked the fixed export resolution during the run and were
+restored to the live viewport's own size afterward via `resize()` in the
+`finally` block — verified directly: canvas size and `res` uniform both read
+`[940, 568]` before, and `[940, 568]` again after, the export.
+
+Both `renderer.render()` calls per export frame go through `renderWithPost()`,
+not just the second (the one `VideoFrame` actually reads) — the first exists
+only to kick off Spark's async sort and is otherwise discarded, but routing
+it through the pass too means the export loop runs the exact same two-step
+draw the live view does, rather than a special raw-then-post sequence that
+only looks equivalent.
+
+### `window.__bench` bypasses the pass entirely — the third trap, held
+
+`draw()` and `settled()` call `renderer.render(scene, camera)` directly,
+never `renderWithPost()` — unchanged by this phase, and re-verified after
+the render-target-to-copyFramebuffer rewrite: every coverage/luma figure
+measured for this phase (and re-measured for Phases A through D as part of
+this phase's own regression sweep) used the raw, bypassed path. Same
+save/restore discipline as the background-colour guard this file already
+documents.
+
+### Full regression sweep, 21 cases, unchanged from Phase D's own list
+
+`3_3_2025.ply`, 940×568, void, base **3.1763 / 13.250 / 13.962**. Every one
+of the 21 cases carried over from Phases A–D still restores to base
+bit-identically after this phase's rewrite, and the final probe after the
+whole sweep is bit-identical to the first — confirming the post-pass
+architecture change touched nothing about the existing per-splat pipeline.
+
+### Frame time
+
+30- and 60-render averages at 44,296 splats: raw (no post pass at all)
+0.075ms; through `renderWithPost()` at neutral 0.093ms; through
+`renderWithPost()` with `vigAmt=0.5, grainAmt=0.3` active 0.065ms. **All
+within noise** — the extra `copyFramebufferToTexture()` call and fullscreen
+quad cost nothing measurable at this splat count and canvas size.
+
+### Preset
+
+**No version bump.** All six new parameters (`vigAmt`, `vigRadius`,
+`vigSoft`, `grainAmt`, `grainSize`, `grainColor`) are additive `SPEC`
+entries; v6 stands. Verified: round-trip `serialize() -> applyPreset() ->
+serialize()` byte-exact (modulo `saved`) with all six off default, and a
+synthetic v6 file with all six keys deleted loads cleanly, keeping the
+slider's current values rather than resetting them — the same forgiving-load
+rule every other additive phase in this port follows.
+
+### A methodology note worth keeping: verify shader edits with `node --check`, not a hand-rolled scanner
+
+Two late edits in this phase broke the module with `SyntaxError: Unexpected
+identifier` — a JS **backtick inside a GLSL comment**, closing the enclosing
+`` fragmentShader: `...` `` template literal early. A hand-written regex
+scan (find the first backtick after `fragmentShader:`, treat that as the
+string's end, check the substring for more backticks) missed the second
+instance, because it mis-located the string's own boundary the moment the
+first stray backtick existed — it can't detect what it's already using to
+delimit its own search. Extracting the module's script content and running
+it through `node --check` catches this precisely, points at the exact
+character, and doesn't share the blind spot. Worth using that instead of an
+ad hoc scanner for any future edit inside a template-literal shader string in
+this file.
+
 ---
 
 ## Section accordion and `SPEC` groups
