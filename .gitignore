@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+
+# Local backups taken before in-place edits
+*.bak
+
+# Splat captures. These are large binaries and are data, not source.
+# Drop a capture in the folder to work locally.
+*.ply
+*.spz
+*.splat
+*.ksplat
+*.sog
+
+# ...except the test asset, which IS committed on purpose: "Load test asset"
+# serves it from the repo so the app is runnable as cloned. ~11 MB, well
+# inside Pages' limits.
+!3_3_2025.ply
+
+# Exported video
+*.mp4
+
+# Audio. Test fixtures are regenerable synthetic files, not source.
+*.wav
+*.mp3
+*.ogg
+*.m4a
+*.flac
