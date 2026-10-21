@@ -115,6 +115,20 @@ Most effects are a single `dyno.dynoBlock` running in one GPU pass as an
   floor** is Spark's `blurAmount`, lowered to keep sub-pixel dots alive.
   Maskable. The dots are still Gaussians, so small ones thin and darken the
   image — compensate with Opacity × all, deliberately not automatically.
+- **Mesh** (in Points) — a coarse wire mesh through a thinned set of splat
+  centres, meant to sit over the point cloud. **Coarseness** sets the grid the
+  centres are thinned into (one node per cell, the most opaque splat in it).
+  Topology: **Nearest neighbours** (organic, roughly triangulated), **Skeleton**
+  (minimum spanning tree — branching, no loops) or **Lattice** (neighbouring grid
+  cells). Built once (tens of ms on the test asset), drawn in one pass, so it costs
+  almost nothing per frame; every look control is a shader value. Colour: white,
+  mono, **two-tone** (hue or its complement per link), capture colour, or black
+  (Normal blend). **Taper** (needle / spindle), **Dotted** with **Dot length** and
+  **Dot travel** (per loop), node dots, and a **Depth cue** (fog, or x-ray when
+  negative). **Reveal** grows the mesh outward from the pivot, top, bottom or at
+  random — each link draws on as it arrives — and is deterministic, so it can be
+  keyed or mapped to audio and exports as previewed. The mesh sits at the splats'
+  rest positions: Noise, Quantise and Wave move the points, not the mesh.
 - **Noise** — `sin()` or curl field over swizzled center × per-splat random direction
 - **Opacity** — per-splat cull by minimum opacity and maximum scale
 - **Colour** — brightness, RGB tint, saturation
@@ -168,7 +182,7 @@ curve. Exports honour envelopes.
 camera keys, gesture bindings, audio mappings, timeline length — as a small
 text file. The splat and the audio are referenced by name only, not embedded,
 so load your capture first and then the preset. Drop a `.json` on the viewport
-to load it. Preset format v7; v1–v6 presets still load.
+to load it. Preset format v8; older presets still load, with any features they predate (Points, Lights, Mesh) reset.
 
 Keep the tab visible while exporting — Chrome throttles background timers to
 ~1s, which slows the render to roughly a frame per second.

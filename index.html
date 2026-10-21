@@ -914,7 +914,7 @@
   </details>
 
   <details class="mod" data-group="points" data-tab="look" open>
-    <summary>Points <em>point-cloud morph</em><i class="gflag"></i></summary>
+    <summary>Points <em>point cloud + mesh</em><i class="gflag"></i></summary>
     <p style="color:var(--ink-dim); margin:0 0 8px">Pulls every splat toward one small, uniform dot, so the capture reads as a point cloud. The splats are still Gaussians, so very small dots thin out and darken the image; raise <strong>Opacity × all</strong> (Scene tab) or route audio onto it to compensate. Scope it to one mask with the lane's <em>Mask</em> control.</p>
     <div class="row" title="0 = the capture as trained, 1 = every splat a uniform dot. Neutral by value at 0."><label>Point cloud</label><output id="o-ptIso">—</output>
       <input type="range" id="p-ptIso" min="0" max="1" step="0.01" value="0"></div>
@@ -924,6 +924,60 @@
       <input type="range" id="p-ptJit" min="0" max="1" step="0.01" value="0"></div>
     <div class="row" title="Spark's antialiasing floor on projected splat size (its blurAmount, in pixels²). 0.3 is Spark's default. Lower it to keep the smallest dots alive below a pixel, at the cost of aliasing and shimmer. Raise it if a large capture shows radial needle shards. Per-capture, not a cleanup control."><label>Antialias floor</label><output id="o-blurAmount">—</output>
       <input type="range" id="p-blurAmount" min="0" max="1.5" step="0.01" value="0.3"></div>
+    <div class="subhead">Mesh <em>coarse links between centres</em></div>
+    <p style="color:var(--ink-dim); margin:0 0 8px">A coarse wire mesh through a thinned-out set of splat centres — keeps the gist of the geometry, not the detail. Built once, then drawn in a single pass, so it costs almost nothing per frame. It sits at the splats' rest positions: Noise and Quantise move the points but not the mesh.</p>
+    <div class="btns" style="margin-bottom:9px">
+      <select id="mshTopo" title="Nearest: each node linked to its closest few — an organic, roughly triangulated mesh. Skeleton: a minimum spanning tree — branching, no loops, sparse. Lattice: links between neighbouring grid cells — a grid that bends with the capture.">
+        <option value="knn" selected>Nearest neighbours</option>
+        <option value="mst">Skeleton (spanning tree)</option>
+        <option value="lattice">Lattice</option>
+      </select>
+      <select id="mshColor" title="Line colour. Two-tone gives each link either the hue or its complement. Black needs Normal blend — under Additive, black adds nothing.">
+        <option value="white" selected>White</option>
+        <option value="mono">Mono — hue</option>
+        <option value="two">Two-tone</option>
+        <option value="capture">Capture colour</option>
+        <option value="black">Black</option>
+      </select>
+      <select id="mshBlend" title="Additive glows and never hides the splats; Normal paints over them (and is the only way black shows).">
+        <option value="add" selected>Additive</option>
+        <option value="normal">Normal</option>
+      </select>
+      <select id="mshGrow" title="Where Reveal grows the mesh from. Pivot is whatever the camera orbits around; the order is fixed when the mesh is built.">
+        <option value="pivot" selected>Grow from pivot</option>
+        <option value="bottom">Grow from bottom</option>
+        <option value="top">Grow from top</option>
+        <option value="random">Grow at random</option>
+      </select>
+    </div>
+    <div class="row" title="Master opacity for the mesh. 0 is off — not drawn at all."><label>Mesh</label><output id="o-mshAmt">—</output>
+      <input type="range" id="p-mshAmt" min="0" max="1" step="0.01" value="0"></div>
+    <div class="row" title="How coarse the mesh is: the grid cell size the centres are thinned into, log-mapped from 1% to 25% of the capture radius. Rebuilds the mesh."><label>Coarseness</label><output id="o-mshCell">—</output>
+      <input type="range" id="p-mshCell" min="0" max="1" step="0.01" value="0.45"></div>
+    <div class="row" title="Nearest neighbours: links per node. Skeleton and Lattice ignore it. Rebuilds the mesh."><label>Links per node</label><output id="o-mshK">—</output>
+      <input type="range" id="p-mshK" min="1" max="6" step="1" value="3"></div>
+    <div class="row" title="Longest link allowed, in grid cells. Short keeps the mesh on the surface; long bridges gaps. Rebuilds the mesh."><label>Max link length</label><output id="o-mshMaxLen">—</output>
+      <input type="range" id="p-mshMaxLen" min="1" max="4" step="0.1" value="2.2"></div>
+    <div class="row" title="Fraction of the mesh drawn, growing outward from the Grow-from point; each link draws on as it arrives. 1 = all of it. Map it to audio or key it for a mesh that builds over the timeline."><label>Reveal</label><output id="o-mshReveal">—</output>
+      <input type="range" id="p-mshReveal" min="0" max="1" step="0.005" value="1"></div>
+    <div class="row" title="Line width, in fractions of the capture radius."><label>Width</label><output id="o-mshWidth">—</output>
+      <input type="range" id="p-mshWidth" min="0.0002" max="0.01" step="0.0001" value="0.0015"></div>
+    <div class="row" title="Below 0: needle — fat at the joints, thin between, reads as rivets. Above 0: spindle — fat in the middle, reads as struts. 0 is a plain line."><label>Taper</label><output id="o-mshTaper">—</output>
+      <input type="range" id="p-mshTaper" min="-1" max="1" step="0.02" value="0"></div>
+    <div class="row" title="0 = solid lines. Above 0, lines become dotted: this many dots per grid cell of length, evenly spaced whatever the link's length."><label>Dotted</label><output id="o-mshDash">—</output>
+      <input type="range" id="p-mshDash" min="0" max="12" step="0.5" value="0"></div>
+    <div class="row" title="Length of each dot as a fraction of its spacing. Small values give round dots the width of the line; larger ones give dashes."><label>Dot length</label><output id="o-mshDuty">—</output>
+      <input type="range" id="p-mshDuty" min="0.05" max="0.95" step="0.01" value="0.3"></div>
+    <div class="row" title="Dots travel along the links, this many spacings per timeline loop. Whole numbers loop seamlessly; negative runs backwards."><label>Dot travel</label><output id="o-mshTravel">—</output>
+      <input type="range" id="p-mshTravel" min="-16" max="16" step="1" value="0"></div>
+    <div class="row" title="Dots on the nodes, in fractions of the capture radius. 0 = none."><label>Node dots</label><output id="o-mshNode">—</output>
+      <input type="range" id="p-mshNode" min="0" max="0.02" step="0.0005" value="0"></div>
+    <div class="row" title="Mono and Two-tone hue. Two-tone pairs it with its complement."><label>Hue</label><output id="o-mshHue">—</output>
+      <input type="range" class="hue" id="p-mshHue" min="0" max="1" step="0.005" value="0.55"></div>
+    <div class="row" title="Brightness of the line colour."><label>Intensity</label><output id="o-mshInten">—</output>
+      <input type="range" id="p-mshInten" min="0.1" max="3" step="0.05" value="1"></div>
+    <div class="row" title="Above 0 dims the far side, so the form reads as solid. Below 0 brightens it — the back shows through the front, an x-ray."><label>Depth cue</label><output id="o-mshCue">—</output>
+      <input type="range" id="p-mshCue" min="-1" max="1" step="0.02" value="0.4"></div>
   </details>
 
   <details class="mod" data-group="lights" data-tab="look" open>
@@ -3104,6 +3158,10 @@ const SPEC = [
      out by updateOptics() on the same per-frame path as dofFocus/smear. */
   ["blurAmount", 2, "points"],
   ["ptIso", 2, "points"], ["ptSize", 3, "points"], ["ptJit", 2, "points"],
+  ["mshAmt", 2, "points"], ["mshCell", 2, "points"], ["mshK", 0, "points"], ["mshMaxLen", 1, "points"],
+  ["mshReveal", 3, "points"], ["mshWidth", 4, "points"], ["mshTaper", 2, "points"],
+  ["mshDash", 1, "points"], ["mshDuty", 2, "points"], ["mshTravel", 0, "points"], ["mshNode", 4, "points"],
+  ["mshHue", 3, "points"], ["mshInten", 2, "points"], ["mshCue", 2, "points"],
   ["swirlAmt", 1, "optics"], ["swirlFalloff", 2, "optics"],
   ["fieldCurve", 2, "optics"], ["planeTilt", 1, "optics"], ["planeSwing", 1, "optics"],
   ["bright", 2, "colour"],
@@ -3163,6 +3221,7 @@ const CULL_MIN = 0.0002, CULL_MAX = 0.1;
    perceptual 0..1, mapped to 1e-4..0.05 of the capture radius, neutral at
    0.65. A linear range spent most of its travel doing nothing. */
 const PT_SIZE_NEUTRAL = 0.65;
+const mshCellFrac = (u) => 0.01 * Math.pow(25, u);   // mesh grid cell, fraction of radius
 const ptDotSize = (u) => 1e-4 * Math.pow(0.05 / 1e-4, u);
 const cullSize = (u) => CULL_MIN * Math.pow(CULL_MAX / CULL_MIN, u);
 
@@ -3204,6 +3263,7 @@ const SHOW = {
      reason: the useful band spans two orders of magnitude and sits well below
      1, which a linear control puts entirely in the bottom of its travel. */
   splatOpacity: (v) => { const m = Math.pow(2, v); return (m < 0.1 ? m.toFixed(3) : m.toFixed(2)) + "×"; },
+  mshCell: (v) => (mshCellFrac(v) * 100).toFixed(1) + "% r",
 };
 const readout = (id, digits, v) => SHOW[id] ? SHOW[id](v) : v.toFixed(digits);
 
@@ -3251,7 +3311,9 @@ const DEFAULT = {};
  * clip duration, bitrate, sort settle or pixel ratio is either meaningless
  * or would make an export non-reproducible.
  * ------------------------------------------------------------------ */
-const NO_ANIM = new Set(["dur", "br", "settle", "dpr"]);
+/* mshCell / mshK / mshMaxLen rebuild the mesh's geometry — animating them
+   would rebuild every frame, so they are structural like Duration. */
+const NO_ANIM = new Set(["dur", "br", "settle", "dpr", "mshCell", "mshK", "mshMaxLen"]);
 const ANIM = SPEC.map(([id]) => id).filter((id) => !NO_ANIM.has(id));
 
 const ENV = {};                     // id -> { on, smooth, keys:[{t,v}] }
@@ -5337,6 +5399,7 @@ function updateShaderUniforms() {
   u.nearBoost.value    = V.nearBoost;
   u.splatOpacity.value = Math.pow(2, V.splatOpacity);
   pushLightUniforms(u);
+  updateMeshOverlay();
 }
 
 /* Optics — plain SparkRenderer properties, same per-frame discipline and the
@@ -5532,6 +5595,364 @@ for (let n = 1; n <= LT_N; n++) {
   };
 }
 let ltPlaceSlot = 1;
+
+
+/* ------------------------------------------------------------------ *
+ * Mesh — a coarse wire graph through thinned splat centres. The cheap
+ * cousin of FX Bench's edge graph: that one spawns, ages and evicts up to
+ * 16k edges on the CPU every frame, draws 24-segment strips plus a glow
+ * pass, and is stateful (so it cannot scrub or export deterministically).
+ * This one is BUILT ONCE — voxel-thin the centres, link them — and every
+ * look control after that is a uniform. Reveal replaces accretion: each
+ * link carries a fixed order (graph distance from a seed), so "growing"
+ * is a function of one value and scrubs, loops and exports exactly.
+ *
+ *   nodes   one per grid cell: the most opaque centre in it (cells with a
+ *           single faint splat are dropped — floaters, haze)
+ *   links   nearest: k nearest within max length; skeleton: minimum
+ *           spanning tree over the k=8 candidate graph; lattice: the six
+ *           face-adjacent cells
+ *   order   Dijkstra over link lengths from the seed; other components
+ *           start at their straight-line distance from it
+ *
+ * Rest positions only: Noise / Quantise / Wave move the splats, not this.
+ * ------------------------------------------------------------------ */
+let MSH = { sig: null, nodes: 0, links: 0, ms: 0, at: 0, built: null };
+let mshSrc = null;   // per-capture centre/opacity/colour cache: {n, pos, op, col}
+const mshSel = () => ({ topo: $("mshTopo").value, grow: $("mshGrow").value });
+function mshGather() {
+  if (mshSrc && mshSrc.key === nrmKeyBase()) return mshSrc;
+  const n = mesh.numSplats, pos = new Float32Array(n * 3), op = new Float32Array(n), col = new Float32Array(n * 3);
+  mesh.forEachSplat((i, c, sc, q, o, rgb) => {
+    pos[i*3] = c.x; pos[i*3+1] = c.y; pos[i*3+2] = c.z; op[i] = o ?? 1;
+    if (rgb) { col[i*3] = rgb.r; col[i*3+1] = rgb.g; col[i*3+2] = rgb.b; }
+  });
+  return (mshSrc = { key: nrmKeyBase(), n, pos, op, col });
+}
+const mshHash = (i) => { const s = Math.sin(i * 12.9898 + 78.233) * 43758.5453; return s - Math.floor(s); };
+
+function mshBuild() {
+  const t0 = performance.now();
+  const S = mshGather();
+  const cell = Math.max(mshCellFrac(P.mshCell) * radius, 1e-6), inv = 1 / cell;
+  // --- nodes: best (most opaque) splat per cell, needs >= 2 splats or a solid one
+  const best = new Map();       // cellKey -> [idx, op, count]
+  const key = (x, y, z) => `${x},${y},${z}`;
+  for (let i = 0; i < S.n; i++) {
+    const o = S.op[i];
+    if (o < 0.05) continue;
+    const k = key(Math.floor(S.pos[i*3] * inv), Math.floor(S.pos[i*3+1] * inv), Math.floor(S.pos[i*3+2] * inv));
+    const b = best.get(k);
+    if (!b) best.set(k, [i, o, 1]);
+    else { b[2]++; if (o > b[1]) { b[0] = i; b[1] = o; } }
+  }
+  const nodeIdx = [], cellOf = new Map();
+  for (const [k, b] of best) {
+    if (b[2] < 2 && b[1] < 0.5) continue;
+    cellOf.set(k, nodeIdx.length);
+    nodeIdx.push(b[0]);
+  }
+  const N = nodeIdx.length;
+  const np = new Float32Array(N * 3), nc = new Float32Array(N * 3);
+  for (let j = 0; j < N; j++) {
+    const i = nodeIdx[j];
+    np.set(S.pos.subarray(i * 3, i * 3 + 3), j * 3);
+    nc.set(S.col.subarray(i * 3, i * 3 + 3), j * 3);
+  }
+  const d2 = (a, b) => { const x = np[a*3]-np[b*3], y = np[a*3+1]-np[b*3+1], z = np[a*3+2]-np[b*3+2]; return x*x + y*y + z*z; };
+  // --- links
+  const topo = $("mshTopo").value;
+  const maxLen = P.mshMaxLen * cell, max2 = maxLen * maxLen;
+  const seen = new Set(), A = [], B = [];
+  const addLink = (a, b) => {
+    if (a === b) return;
+    const lo = Math.min(a, b), hi = Math.max(a, b), k = lo * N + hi;
+    if (seen.has(k)) return;
+    seen.add(k); A.push(lo); B.push(hi);
+  };
+  const cellIdx = (j) => [Math.floor(np[j*3] * inv), Math.floor(np[j*3+1] * inv), Math.floor(np[j*3+2] * inv)];
+  const knnOf = (j, k) => {
+    const [cx, cy, cz] = cellIdx(j), R = Math.ceil(P.mshMaxLen) + 1, cand = [];
+    for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) for (let dz = -R; dz <= R; dz++) {
+      const m = cellOf.get(key(cx + dx, cy + dy, cz + dz));
+      if (m === undefined || m === j) continue;
+      const dd = d2(j, m);
+      if (dd <= max2) cand.push([dd, m]);
+    }
+    cand.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+    return cand.slice(0, k);
+  };
+  if (topo === "lattice") {
+    for (let j = 0; j < N; j++) {
+      const [cx, cy, cz] = cellIdx(j);
+      for (const [dx, dy, dz] of [[1, 0, 0], [0, 1, 0], [0, 0, 1]]) {
+        const m = cellOf.get(key(cx + dx, cy + dy, cz + dz));
+        if (m !== undefined) addLink(j, m);
+      }
+    }
+  } else if (topo === "mst") {
+    const cands = [];
+    for (let j = 0; j < N; j++) for (const [dd, m] of knnOf(j, 8)) if (j < m) cands.push([dd, j, m]);
+    cands.sort((p, q) => p[0] - q[0]);
+    const par = Int32Array.from({ length: N }, (_, i) => i);
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (const [, a, b] of cands) { const ra = find(a), rb = find(b); if (ra !== rb) { par[ra] = rb; addLink(a, b); } }
+  } else {
+    const k = Math.round(P.mshK);
+    for (let j = 0; j < N; j++) for (const [, m] of knnOf(j, k)) addLink(j, m);
+  }
+  const E = A.length;
+  // --- reveal order: Dijkstra over link length from the seed
+  const adj = Array.from({ length: N }, () => []);
+  for (let e = 0; e < E; e++) { const w = Math.sqrt(d2(A[e], B[e])); adj[A[e]].push([B[e], w]); adj[B[e]].push([A[e], w]); }
+  const grow = $("mshGrow").value;
+  const ord = new Float32Array(N).fill(Infinity);
+  if (N) {
+    let seed = 0;
+    if (grow === "random") {
+      for (let j = 0; j < N; j++) ord[j] = mshHash(j);
+    } else {
+      mesh.updateMatrixWorld(true);
+      const wy = (j) => new THREE.Vector3(np[j*3], np[j*3+1], np[j*3+2]).applyMatrix4(mesh.matrixWorld).y;
+      if (grow === "pivot") {
+        const tl = mesh.worldToLocal(controls.target.clone());
+        let bd = Infinity;
+        for (let j = 0; j < N; j++) { const x = np[j*3]-tl.x, y = np[j*3+1]-tl.y, z = np[j*3+2]-tl.z, dd = x*x+y*y+z*z; if (dd < bd) { bd = dd; seed = j; } }
+      } else {
+        let bv = grow === "top" ? -Infinity : Infinity;
+        for (let j = 0; j < N; j++) { const v = wy(j); if (grow === "top" ? v > bv : v < bv) { bv = v; seed = j; } }
+      }
+      // multi-source Dijkstra: each component starts at its straight-line distance from the seed
+      const dist0 = (j) => Math.sqrt(d2(seed, j));
+      const heap = [];   // [d, j]
+      const push = (d, j) => { heap.push([d, j]); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+      const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2*i+1, r = l+1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+      ord[seed] = 0; push(0, seed);
+      const drain = () => { while (heap.length) { const [d, j] = pop(); if (d > ord[j]) continue; for (const [m, w] of adj[j]) if (d + w < ord[m]) { ord[m] = d + w; push(ord[m], m); } } };
+      drain();
+      // unreached components, nearest first
+      const rest = [];
+      for (let j = 0; j < N; j++) if (ord[j] === Infinity) rest.push(j);
+      rest.sort((a, b) => dist0(a) - dist0(b));
+      for (const j of rest) if (ord[j] === Infinity) { ord[j] = dist0(j); push(ord[j], j); drain(); }
+      let mx = 0; for (let j = 0; j < N; j++) mx = Math.max(mx, ord[j]);
+      for (let j = 0; j < N; j++) ord[j] = mx > 0 ? ord[j] / mx : 0;
+    }
+  }
+  // --- instance buffers. Each link runs FROM its earlier node, so it draws on outward.
+  const iA = new Float32Array(E * 3), iB = new Float32Array(E * 3), iCap = new Float32Array(E * 3);
+  const iOrd = new Float32Array(E), iTone = new Float32Array(E), iLen = new Float32Array(E), iEnd = new Float32Array(E);
+  for (let e = 0; e < E; e++) {
+    let a = A[e], b = B[e];
+    if (ord[b] < ord[a]) [a, b] = [b, a];
+    iA.set(np.subarray(a * 3, a * 3 + 3), e * 3);
+    iB.set(np.subarray(b * 3, b * 3 + 3), e * 3);
+    for (let c = 0; c < 3; c++) iCap[e * 3 + c] = 0.5 * (nc[a * 3 + c] + nc[b * 3 + c]);
+    iOrd[e] = ord[a]; iEnd[e] = ord[b];
+    iTone[e] = mshHash(a * 7919 + b) < 0.5 ? 0 : 1;
+    iLen[e] = Math.sqrt(d2(a, b));
+  }
+  const nTone = new Float32Array(N);
+  for (let j = 0; j < N; j++) nTone[j] = mshHash(j * 31 + 7) < 0.5 ? 0 : 1;
+  mshUpload({ E, N, iA, iB, iCap, iOrd, iEnd, iTone, iLen, np, nc, ord, nTone });
+  MSH.nodes = N; MSH.links = E; MSH.ms = performance.now() - t0; MSH.cell = cell;
+  setStatus(`Mesh: ${N.toLocaleString()} nodes, ${E.toLocaleString()} links (${$("mshTopo").selectedOptions[0].text.toLowerCase()}) in ${MSH.ms.toFixed(0)} ms.`);
+}
+
+/* --- rendering: camera-facing quads (gl.LINES is stuck at 1px on desktop
+   GL), additive or normal blend, drawn after the splats with no depth test,
+   so it needs no place in Spark's sort. Two strip templates: one segment
+   when lines are straight and even, twelve when Taper needs to bend the
+   width along the line. --- */
+const MSH_SEG = 12;
+function mshStrip(nSeg) {
+  const side = new Float32Array(nSeg * 6), tt = new Float32Array(nSeg * 6);
+  for (let i = 0; i < nSeg; i++) {
+    const t0 = i / nSeg, t1 = (i + 1) / nSeg, o = i * 6;
+    side.set([-1, 1, -1, 1, 1, -1], o);
+    tt.set([t0, t0, t1, t0, t1, t1], o);
+  }
+  return { side, tt, count: nSeg * 6 };
+}
+function mshStripGeo(nSeg) {
+  const st = mshStrip(nSeg), g = new THREE.InstancedBufferGeometry();
+  g.setAttribute("aSide", new THREE.BufferAttribute(st.side, 1));
+  g.setAttribute("aT", new THREE.BufferAttribute(st.tt, 1));
+  g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(st.count * 3), 3));
+  g.instanceCount = 0;
+  return g;
+}
+const MSH_COLOR_MODES = ["white", "mono", "two", "capture", "black"];
+const mshCommonU = () => ({
+  uAmt: { value: 0 }, uReveal: { value: 1 }, uMode: { value: 0 }, uInten: { value: 1 },
+  uCol1: { value: new THREE.Color(1, 1, 1) }, uCol2: { value: new THREE.Color(1, 1, 1) },
+  uCue: { value: 0 }, uPivotZ: { value: 1 }, uRange: { value: 1 },
+});
+const MSH_COLOUR_GLSL = `
+  uniform float uMode; uniform float uInten; uniform vec3 uCol1; uniform vec3 uCol2;
+  vec3 mshColour(float tone, vec3 cap){
+    vec3 c = uMode < 0.5 ? vec3(1.0) : uMode < 1.5 ? uCol1 : uMode < 2.5 ? mix(uCol1, uCol2, tone)
+           : uMode < 3.5 ? cap : vec3(0.0);
+    return c * uInten;
+  }
+  uniform float uCue; uniform float uPivotZ; uniform float uRange;
+  float mshCueOf(float z){
+    if (uCue == 0.0) return 1.0;
+    float rel = clamp((z - uPivotZ) / max(uRange, 1e-4) * 0.5 + 0.5, 0.0, 1.0);
+    return max(uCue > 0.0 ? mix(1.0, 1.0 - rel, uCue) : mix(1.0, rel, -uCue), 0.02);
+  }`;
+const mshLineMat = new THREE.ShaderMaterial({
+  uniforms: { ...mshCommonU(), uWidth: { value: 0.001 }, uTaper: { value: 0 }, uSpacing: { value: 0 },
+              uDuty: { value: 0.3 }, uPhase: { value: 0 }, uObjScale: { value: 1 } },
+  vertexShader: `
+    attribute vec3 iA; attribute vec3 iB; attribute vec3 iCap;
+    attribute float iOrd; attribute float iEnd; attribute float iTone; attribute float iLen;
+    attribute float aSide; attribute float aT;
+    uniform float uWidth; uniform float uTaper; uniform float uReveal; uniform float uObjScale;
+    varying vec3 vColor; varying float vA; varying float vSide; varying float vS; varying float vW; varying float vLen;
+    ${MSH_COLOUR_GLSL}
+    void main(){
+      // draw-on: the link appears when Reveal passes its start node and is
+      // fully drawn when Reveal reaches its end node (soft 4% band)
+      float span = max(iEnd - iOrd, 0.02);
+      float rev = clamp((uReveal * 1.04 - iOrd) / span, 0.0, 1.0);
+      float t = aT * rev;
+      vec3 p = mix(iA, iB, t);
+      vec4 mv = modelViewMatrix * vec4(p, 1.0);
+      vec3 dirV = normalize((modelViewMatrix * vec4(iB - iA, 0.0)).xyz + vec3(1e-8));
+      vec3 perp = normalize(cross(dirV, normalize(-mv.xyz)));
+      float tap = 1.0;
+      if (uTaper > 0.0)      tap = mix(1.0, sin(3.14159265 * t) * 2.0, uTaper * 0.5);   // spindle
+      else if (uTaper < 0.0) tap = mix(1.0, 1.0 - sin(3.14159265 * t) * 0.9, -uTaper);  // needle
+      float w = uWidth * max(tap, 0.02);
+      mv.xyz += perp * aSide * w * uObjScale;
+      gl_Position = projectionMatrix * mv;
+      vColor = mshColour(iTone, iCap);
+      vA = (rev > 0.0 ? 1.0 : 0.0) * mshCueOf(-mv.z);
+      vSide = aSide; vS = t * iLen; vW = w; vLen = iLen;
+    }`,
+  fragmentShader: `
+    uniform float uAmt; uniform float uSpacing; uniform float uDuty; uniform float uPhase;
+    varying vec3 vColor; varying float vA; varying float vSide; varying float vS; varying float vW; varying float vLen;
+    void main(){
+      float a = vA * uAmt * smoothstep(1.0, 0.55, abs(vSide));
+      if (uSpacing > 0.0) {
+        // dots as capsules in line-width units: round when short, dashes when long
+        float ph = fract(vS / uSpacing - uPhase) - 0.5;
+        float halfLen = max(uDuty * uSpacing * 0.5 - vW, 0.0);
+        float d = length(vec2(max(abs(ph * uSpacing) - halfLen, 0.0) / max(vW, 1e-7), vSide));
+        a *= 1.0 - smoothstep(0.7, 1.0, d);
+      }
+      if (a <= 0.002) discard;
+      gl_FragColor = vec4(vColor, a);
+    }`,
+  transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
+});
+const mshNodeMat = new THREE.ShaderMaterial({
+  uniforms: { ...mshCommonU(), uSize: { value: 0 }, uObjScale: { value: 1 } },
+  vertexShader: `
+    attribute vec3 iP; attribute vec3 iCap; attribute float iOrd; attribute float iTone;
+    uniform float uSize; uniform float uReveal; uniform float uObjScale;
+    varying vec3 vColor; varying float vA; varying vec2 vUv;
+    ${MSH_COLOUR_GLSL}
+    void main(){
+      vec4 mv = modelViewMatrix * vec4(iP, 1.0);
+      mv.xy += position.xy * uSize * uObjScale;
+      gl_Position = projectionMatrix * mv;
+      vColor = mshColour(iTone, iCap);
+      vA = smoothstep(iOrd, iOrd + 0.03, uReveal * 1.04) * mshCueOf(-mv.z);
+      vUv = position.xy;
+    }`,
+  fragmentShader: `
+    uniform float uAmt; varying vec3 vColor; varying float vA; varying vec2 vUv;
+    void main(){
+      float a = vA * uAmt * (1.0 - smoothstep(0.6, 1.0, length(vUv)));
+      if (a <= 0.002) discard;
+      gl_FragColor = vec4(vColor, a);
+    }`,
+  transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
+});
+const mshGeo = mshStripGeo(MSH_SEG), mshGeoLo = mshStripGeo(1);
+const mshNodeGeo = new THREE.InstancedBufferGeometry();
+mshNodeGeo.setIndex([0, 1, 2, 0, 2, 3]);
+mshNodeGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]), 3));
+mshNodeGeo.instanceCount = 0;
+const mshLines = new THREE.Mesh(mshGeoLo, mshLineMat);
+const mshNodes = new THREE.Mesh(mshNodeGeo, mshNodeMat);
+for (const o of [mshLines, mshNodes]) {
+  o.frustumCulled = false; o.visible = false; o.matrixAutoUpdate = false;
+  o.renderOrder = 10;               // after the splats
+  scene.add(o);
+}
+function mshUpload(d) {
+  const inst = (arr, n) => new THREE.InstancedBufferAttribute(arr, n);
+  for (const g of [mshGeo, mshGeoLo]) {
+    g.setAttribute("iA", inst(d.iA, 3)); g.setAttribute("iB", inst(d.iB, 3)); g.setAttribute("iCap", inst(d.iCap, 3));
+    g.setAttribute("iOrd", inst(d.iOrd, 1)); g.setAttribute("iEnd", inst(d.iEnd, 1));
+    g.setAttribute("iTone", inst(d.iTone, 1)); g.setAttribute("iLen", inst(d.iLen, 1));
+    g._maxInstanceCount = undefined;    // THREE latches this on first draw; a bigger rebuild must lift it
+    g.instanceCount = d.E;
+  }
+  mshNodeGeo.setAttribute("iP", inst(d.np, 3)); mshNodeGeo.setAttribute("iCap", inst(d.nc, 3));
+  mshNodeGeo.setAttribute("iOrd", inst(d.ord, 1)); mshNodeGeo.setAttribute("iTone", inst(d.nTone, 1));
+  mshNodeGeo._maxInstanceCount = undefined;
+  mshNodeGeo.instanceCount = d.N;
+}
+const mshSigNow = () => `${nrmKeyBase()}|${P.mshCell}|${P.mshK}|${P.mshMaxLen}|${$("mshTopo").value}|${$("mshGrow").value}`;
+for (const id of ["mshTopo", "mshGrow"]) $(id).addEventListener("change", () => { MSH.at = 0; });
+for (const id of ["mshColor", "mshBlend"]) $(id).addEventListener("change", () => updateMeshOverlay());
+let _mshBlend = "add";
+/* Per frame (and per export frame), from updateShaderUniforms. Structural
+   changes rebuild after a short pause so a slider drag does not rebuild on
+   every tick; everything else is uniforms. */
+function updateMeshOverlay() {
+  const on = !!mesh && !splatLoading && ltNum("mshAmt", 0) > 0;
+  if (!on) { mshLines.visible = mshNodes.visible = false; return; }
+  const sig = mshSigNow();
+  if (sig !== MSH.sig) {
+    const now = performance.now();
+    if (!MSH.pending || MSH.pending !== sig) { MSH.pending = sig; MSH.at = now; }
+    if (rendering || !MSH.sig || now - MSH.at > 180) {
+      try { mshBuild(); } catch (e) { setStatus("Mesh build failed: " + e.message, true); }
+      MSH.sig = sig; MSH.pending = null;
+    }
+  }
+  mesh.updateMatrixWorld();
+  for (const o of [mshLines, mshNodes]) { o.matrix.copy(mesh.matrixWorld); o.matrixWorldNeedsUpdate = true; }
+  const objScale = new THREE.Vector3().setFromMatrixScale(mesh.matrixWorld).x;
+  const mode = Math.max(0, MSH_COLOR_MODES.indexOf($("mshColor").value));
+  const blend = $("mshBlend").value;
+  if (blend !== _mshBlend) {
+    _mshBlend = blend;
+    for (const m of [mshLineMat, mshNodeMat]) { m.blending = blend === "add" ? THREE.AdditiveBlending : THREE.NormalBlending; m.needsUpdate = true; }
+  }
+  const pivotZ = camera.position.distanceTo(controls.target);
+  for (const m of [mshLineMat, mshNodeMat]) {
+    const u = m.uniforms;
+    u.uAmt.value = ltNum("mshAmt", 0);
+    u.uReveal.value = ltNum("mshReveal", 1);
+    u.uMode.value = mode;
+    u.uInten.value = ltNum("mshInten", 1);
+    u.uCol1.value.setHSL(ltNum("mshHue", 0.55), 0.75, 0.55);
+    u.uCol2.value.setHSL((ltNum("mshHue", 0.55) + 0.5) % 1, 0.75, 0.55);
+    u.uCue.value = ltNum("mshCue", 0);
+    u.uPivotZ.value = pivotZ;
+    u.uRange.value = Math.max(radius * objScale, 1e-4);
+    u.uObjScale.value = objScale;
+  }
+  const lu = mshLineMat.uniforms;
+  lu.uWidth.value = ltNum("mshWidth", 0.0015) * radius;
+  lu.uTaper.value = ltNum("mshTaper", 0);
+  const dash = ltNum("mshDash", 0);
+  lu.uSpacing.value = dash > 0 ? (MSH.cell ?? radius * 0.04) / dash : 0;
+  lu.uDuty.value = ltNum("mshDuty", 0.3);
+  lu.uPhase.value = ltNum("mshTravel", 0) * playhead;
+  const geo = Math.abs(lu.uTaper.value) > 1e-4 ? mshGeo : mshGeoLo;
+  if (mshLines.geometry !== geo) mshLines.geometry = geo;
+  mshNodeMat.uniforms.uSize.value = ltNum("mshNode", 0) * radius;
+  mshLines.visible = MSH.links > 0;
+  mshNodes.visible = MSH.nodes > 0 && ltNum("mshNode", 0) > 0;
+}
 
 /* ------------------------------------------------------------------ *
  * Surface directions for Shading/Rim — FX Bench Light S, verbatim apart
@@ -6210,12 +6631,13 @@ $("render").onclick = async () => {
    follow. */
 const PRESET_FORMAT = "gausseous-preset";
 const PRESET_FORMAT_LEGACY = "splat-bench-preset";
-const PRESET_VERSION = 7;   // v2 selects; v3 audio; v4 regions+mask; v5 camera keyframes; v6 depth of field re-expressed; v7 points, lights, timeline length, hit source
+const PRESET_VERSION = 8;   // v2 selects; v3 audio; v4 regions+mask; v5 camera keyframes; v6 depth of field re-expressed; v7 points, lights, timeline length, hit source; v8 mesh
 /* `mobileMode` is deliberately absent: it is a property of the device you are
    sitting at, not of the look. A preset saved on a desktop must not force a
    phone back to full pixel ratio, nor the reverse. */
 const TOGGLES = ["useLod"];
-const SELECTS = ["res", "fps", "obAxis", "bgColor", "dField", "dcMode", "dcAxis", "qAxis", "wMode", "dpMode", "dofFocusSrc", "filmProfile", "frAspect"];
+const SELECTS = ["res", "fps", "obAxis", "bgColor", "dField", "dcMode", "dcAxis", "qAxis", "wMode", "dpMode", "dofFocusSrc", "filmProfile", "frAspect",
+                 "mshTopo", "mshColor", "mshBlend", "mshGrow"];
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 function serialize() {
@@ -6316,6 +6738,10 @@ function applyPreset(o) {
     for (const [id, , g] of SPEC) {
       if ((g === "points" || g === "lights") && id !== "blurAmount") setParam(id, parseFloat(DEFAULT[id]));
     }
+  }
+  if (o.version < 8) {   // likewise the mesh, which v8 added
+    for (const [id] of SPEC) if (id.startsWith("msh")) setParam(id, parseFloat(DEFAULT[id]));
+    for (const [k, v] of Object.entries({ mshTopo: "knn", mshColor: "white", mshBlend: "add", mshGrow: "pivot" })) $(k).value = v;
   }
   dpr = P.dpr;
   resize();
@@ -7239,7 +7665,8 @@ const LOOKS = [
     set: { dAmt: 0.01, dFrq: 3, dSpd: 0.4, wAmt: 0.6 }, selects: { dField: "curl" },
     routes: { dAmt: ["mid", 0.06, "swell"] } },
 ];
-const LOOK_SELECT_DEFAULTS = { dField: "sin", dcMode: "off", qAxis: "off", wMode: "hash" };
+const LOOK_SELECT_DEFAULTS = { dField: "sin", dcMode: "off", qAxis: "off", wMode: "hash",
+                               mshTopo: "knn", mshColor: "white", mshBlend: "add", mshGrow: "pivot" };
 function applyLook(lookId) {
   const L = LOOKS.find((l) => l.id === lookId);
   if (!L) return;
@@ -7555,6 +7982,7 @@ if (DEBUG) {
     get rgSlot(){ return rgSlot; },
     get MAX_REGIONS(){ return MAX_REGIONS; },
     get playhead(){ return playhead; },
+    get MSH(){ return MSH; },
     /* Every coverage figure in NOTES was measured against "void". Both probe
        helpers below force it for their own duration regardless of what the
        UI has selected, and restore whatever was there before — a probe run
