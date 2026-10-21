@@ -913,6 +913,29 @@
     </p>
   </details>
 
+  <details class="mod" data-group="bg" data-tab="look" open>
+    <summary>Background <em>canvas colour</em><i class="gflag"></i></summary>
+    <div class="btns" style="margin-bottom:9px">
+      <select id="bgColor" title="The colour behind the capture, in the live view and the export. Depth fade fades toward it. Hue uses the three sliders below, which can be keyframed or mapped to audio.">
+        <option value="void" selected>Void</option>
+        <option value="black">Black</option>
+        <option value="white">White</option>
+        <option value="grey">Mid grey</option>
+        <option value="chroma">Chroma green</option>
+        <option value="hue">Hue</option>
+      </select>
+    </div>
+    <div id="bgHueRows">
+      <div class="row" title="Background hue."><label>Hue</label><output id="o-bgHue">—</output>
+        <input type="range" class="hue" id="p-bgHue" min="0" max="1" step="0.005" value="0.6"></div>
+      <div class="row" title="0 is grey, 1 the pure hue."><label>Saturation</label><output id="o-bgSat">—</output>
+        <input type="range" id="p-bgSat" min="0" max="1" step="0.01" value="0.35"></div>
+      <div class="row" title="0 is black, 1 is white."><label>Brightness</label><output id="o-bgLum">—</output>
+        <input type="range" id="p-bgLum" min="0" max="1" step="0.01" value="0.12"></div>
+    </div>
+    <p style="color:var(--ink-dim); margin:8px 0 0">Additive lights and an additive mesh glow on dark backgrounds and wash out on light ones; for a white background, set the Mesh to Normal blend and Black.</p>
+  </details>
+
   <details class="mod" data-group="points" data-tab="look" open>
     <summary>Points <em>point cloud + mesh</em><i class="gflag"></i></summary>
     <p style="color:var(--ink-dim); margin:0 0 8px">Pulls every splat toward one small, uniform dot, so the capture reads as a point cloud. The splats are still Gaussians, so very small dots thin out and darken the image; raise <strong>Opacity × all</strong> (Scene tab) or route audio onto it to compensate. Scope it to one mask with the lane's <em>Mask</em> control.</p>
@@ -1112,7 +1135,7 @@
   </details>
 
   <details class="mod" data-group="frame" data-tab="look">
-    <summary>Frame <em>vignette + rebate</em><i class="gflag"></i></summary>
+    <summary>Frame <em>vignette, crt, rebate</em><i class="gflag"></i></summary>
     <div class="subhead">Vignette <em>lens falloff</em></div>
     <p style="color:var(--ink-dim); margin:0 0 8px">A fullscreen pass over the finished render, not a per-splat effect — darkens toward the edges in linear light, so it behaves like lost light rather than revealing the background through a translucent cloud. No effect at Amount 0.</p>
     <div class="row"><label>Amount</label><output id="o-vigAmt">—</output>
@@ -1121,6 +1144,14 @@
       <input type="range" id="p-vigRadius" min="0.1" max="1.6" step="0.01" value="0.65"></div>
     <div class="row"><label>Softness</label><output id="o-vigSoft">—</output>
       <input type="range" id="p-vigSoft" min="0.05" max="1.5" step="0.01" value="0.75"></div>
+    <div class="subhead">CRT <em>scanlines + fringe</em></div>
+    <p style="color:var(--ink-dim); margin:0 0 8px">Scanlines across the finished frame, with a colour fringe that grows toward the edges. The line count is per frame height, so an export at any resolution matches the preview. No effect at Amount 0.</p>
+    <div class="row"><label>Amount</label><output id="o-crtAmt">—</output>
+      <input type="range" id="p-crtAmt" min="0" max="1" step="0.01" value="0"></div>
+    <div class="row" title="Scanlines down the frame."><label>Lines</label><output id="o-crtLines">—</output>
+      <input type="range" id="p-crtLines" min="60" max="1200" step="2" value="540"></div>
+    <div class="row" title="Red and blue pulled apart toward the frame edges."><label>Fringe</label><output id="o-crtFringe">—</output>
+      <input type="range" id="p-crtFringe" min="0" max="1" step="0.01" value="0.4"></div>
     <div class="subhead">Rebate <em>film edge</em></div>
     <p style="color:var(--ink-dim); margin:0 0 8px">The physical carrier around the image, applied last — crop, fill, rounded-box edge with a noise-perturbed border. No effect at Border 0 or Aspect "No frame".</p>
     <div class="btns" style="margin-bottom:9px">
@@ -1186,6 +1217,17 @@
     </div>
     <div class="row"><label>Colour offset</label><output id="o-dcAmt">—</output>
       <input type="range" id="p-dcAmt" min="-0.5" max="0.5" step="0.001" value="0"></div>
+  </details>
+
+  <details class="mod" data-group="fracture" data-tab="motion">
+    <summary>Fracture <em>voronoi cells</em><i class="gflag"></i></summary>
+    <p style="color:var(--ink-dim); margin:0 0 8px">Cuts the capture into chunks on a grid and moves each chunk as a whole, each in its own direction and phase — the scan shatters rather than melts. Chunks are keyed to the splats' rest positions, so a chunk stays a chunk however far it travels. No effect at Amount 0. Scope it to a mask with the lane's <em>Mask</em> control.</p>
+    <div class="row" title="How far chunks travel, in multiples of the capture radius."><label>Amount</label><output id="o-vfAmt">—</output>
+      <input type="range" id="p-vfAmt" min="0" max="0.5" step="0.002" value="0"></div>
+    <div class="row" title="Chunk size, in multiples of the capture radius."><label>Cell size</label><output id="o-vfCell">—</output>
+      <input type="range" id="p-vfCell" min="0.02" max="0.8" step="0.005" value="0.15"></div>
+    <div class="row" title="Oscillations per second. 0 holds the chunks still at their offset — map Amount to a band for a hit that shatters and reassembles."><label>Speed</label><output id="o-vfSpd">—</output>
+      <input type="range" id="p-vfSpd" min="0" max="3" step="0.02" value="1"></div>
   </details>
 
   <details class="mod" data-group="quantise" data-tab="motion">
@@ -1316,15 +1358,7 @@
 
   <details class="mod" data-group="viewport" data-tab="export">
     <summary>Viewport<i class="gflag"></i></summary>
-    <div class="btns" style="margin-bottom:9px">
-      <select id="bgColor" title="Applies to the live view and export — not the effect stack, which is always measured against Void">
-        <option value="void" selected>Void</option>
-        <option value="black">Black</option>
-        <option value="grey">Mid grey</option>
-        <option value="white">White</option>
-        <option value="chroma">Chroma green</option>
-      </select>
-    </div>
+    <p style="color:var(--ink-dim); margin:0 0 9px">Background colour is in the Look tab.</p>
     <div class="row"><label>Pixel ratio</label><output id="o-dpr">—</output>
       <input type="range" id="p-dpr" min="0.5" max="2" step="0.05" value="1"></div>
     <label class="check"><input type="checkbox" id="useLod"> Level of detail on next load (large scans)</label>
@@ -1515,8 +1549,17 @@ stage.appendChild(renderer.domElement);
    the __bench guard on draw()/settled() below, which forces void for the
    duration of any probe regardless of what the UI has selected. */
 const BG_COLORS = { void: 0x08090b, black: 0x000000, grey: 0x808080, white: 0xffffff, chroma: 0x00ff00 };
+const _bgC = new THREE.Color();
+let _bgKey = "";
 function applyBgColor() {
-  const hex = BG_COLORS[$("bgColor").value] ?? BG_COLORS.void;
+  const sel = $("bgColor").value;
+  $("bgHueRows").style.display = sel === "hue" ? "" : "none";
+  if (sel === "hue") _bgC.setHSL(V.bgHue ?? 0.6, V.bgSat ?? 0.35, V.bgLum ?? 0.12);
+  else _bgC.setHex(BG_COLORS[sel] ?? BG_COLORS.void);
+  const key = sel + _bgC.getHexString();
+  if (key === _bgKey) return;          // called from every pushUniforms(); only act on a change
+  _bgKey = key;
+  const hex = _bgC.getHex();
   renderer.setClearColor(hex, 1);
   /* Depth fade (Phase 4) fades toward whatever background is showing, so
      the two stay in sync automatically rather than needing their own
@@ -2013,6 +2056,7 @@ const postMat = new THREE.ShaderMaterial({
     veil: { value: 0 },
     frAspect: { value: 0 }, frFill: { value: 0.9 }, frBorder: { value: 0 },
     frJitter: { value: 0.4 }, frRadius: { value: 0.02 }, frTilt: { value: 0 },
+    crtAmt: { value: 0 }, crtLines: { value: 540 }, crtFringe: { value: 0.4 },
   },
   vertexShader: `varying vec2 vUv;
     void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
@@ -2046,6 +2090,7 @@ const postMat = new THREE.ShaderMaterial({
     uniform float fHal, halScale; uniform vec3 fHalTint;
     uniform float veil;
     uniform float frAspect, frFill, frBorder, frJitter, frRadius, frTilt;
+    uniform float crtAmt, crtLines, crtFringe;
 
     const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
@@ -2112,6 +2157,16 @@ const postMat = new THREE.ShaderMaterial({
 
     void main(){
       vec3 src = texture2D(tDiffuse, vUv).rgb;
+      /* CRT fringe (FX Bench) — red and blue sampled outward / inward from
+         the frame centre, so the split grows toward the edges. Read here, at
+         the source, because it is a misregistration of the picture itself.
+         Guarded so Amount 0 is an exact bypass. 14 px at full: FX Bench
+         measured 3 as sub-pixel on a central subject (a dead control). */
+      if (crtAmt > 0.0 && crtFringe > 0.0) {
+        vec2 o = (vUv - 0.5) * (crtFringe * crtAmt * 14.0) / max(res, vec2(1.0));
+        src.r = texture2D(tDiffuse, vUv + o).r;
+        src.b = texture2D(tDiffuse, vUv - o).b;
+      }
       vec3 lin = srgbDecode(src);
 
       /* --- lens: vignette, in linear so it behaves like lost light ----
@@ -2252,6 +2307,14 @@ const postMat = new THREE.ShaderMaterial({
       if (gSat != 1.0) {
         float Lg = dot(col, LUMA);
         col = mix(vec3(Lg), col, gSat);
+      }
+
+      /* --- CRT scanlines, display-referred like the rest of the print
+         stage, before grain (grain sits in the emulsion, scanlines in the
+         display). Counted per frame height so export matches preview. */
+      if (crtAmt > 0.0) {
+        float sl = 0.5 + 0.5 * sin(vUv.y * crtLines * 3.14159265);
+        col *= mix(1.0, sl, crtAmt * 0.7);
       }
 
       /* --- silver: grain last. Size is in OUTPUT PIXELS via gl_FragCoord,
@@ -2516,6 +2579,10 @@ const U = {
   ptIso:   F(0),
   ptDot:   F(0.01),
   ptJit:   F(0),
+  /* Voronoi fracture (FX Bench vf). vfAmt is x radius already. */
+  vfAmt:   F(0),
+  vfCell:  F(0.15),
+  vfSpd:   F(1),
   dAmt:    F(0),
   dFrq:    F(2),
   dSpd:    F(0.3),
@@ -2581,12 +2648,12 @@ const U = {
      1..MAX_REGIONS = region slot. invert flips how that ONE consumer reads
      the mask, independent of the region's own `invert` (which affects the
      region's own cut/crop/colorize job instead). */
-  maskSrcI: { dAmt: F(0), sat: F(0), tint: F(0), cullA: F(0), cullS: F(0), scale: F(0), ptIso: F(0) },
-  maskInv:  { dAmt: F(0), sat: F(0), tint: F(0), cullA: F(0), cullS: F(0), scale: F(0), ptIso: F(0) },
+  maskSrcI: { dAmt: F(0), sat: F(0), tint: F(0), cullA: F(0), cullS: F(0), scale: F(0), ptIso: F(0), vfAmt: F(0) },
+  maskInv:  { dAmt: F(0), sat: F(0), tint: F(0), cullA: F(0), cullS: F(0), scale: F(0), ptIso: F(0), vfAmt: F(0) },
 };
 const RG_SHAPES = ["sphere", "box", "ellipsoid", "cylinder", "capsule", "plane", "all"];
 const RG_MODES  = ["off", "cut", "crop", "color"];
-const MASKABLE  = ["dAmt", "sat", "tint", "cullA", "cullS", "scale", "ptIso"];
+const MASKABLE  = ["dAmt", "sat", "tint", "cullA", "cullS", "scale", "ptIso", "vfAmt"];
 const DFIELD_MODES  = ["sin", "curl"];
 const DCOLOR_MODES  = ["off", "luma", "hue"];
 const AXIS3         = ["x", "y", "z"];        // shared by dcAxis, qAxis (offset by 1 for "off"), wMode (offset by 1 for "hash")
@@ -2854,6 +2921,27 @@ function buildModifier() {
     const rnd = dyno.sub(dyno.mul(dyno.hashVec3(g.index), c(2)), ONE3); // vec3, -1..1
     const dir = dyno.add(ONE3, dyno.mul(dyno.sub(rnd, ONE3), U.dRnd));
     center = dyno.add(center, dyno.mul(dyno.mul(field, dir), dAmtEff));
+
+    /* --- Voronoi / cellular fracture (FX Bench vf, same maths) ----------
+       Bucket the REST centre by cell, so the lattice does not re-bucket as
+       displacement moves splats across a boundary — a chunk stays a chunk.
+       The integer cell coordinate folds into one float id (x + 113y +
+       12769z), hashed for a unit-ish direction and a phase; the whole chunk
+       translates along it by a sine. Neutral by value at vfAmt 0. Scaled by
+       the wave like Noise and Quantise, and maskable. */
+    {
+      const cellSafe = dyno.max(U.vfCell, c(1e-4));
+      const cellCoord = dyno.floor(dyno.div(restCenter, dyno.mul(ONE3, cellSafe)));
+      const cellId = dyno.add(
+        dyno.add(dyno.swizzle(cellCoord, "x"), dyno.mul(dyno.swizzle(cellCoord, "y"), c(113.0))),
+        dyno.mul(dyno.swizzle(cellCoord, "z"), c(12769.0)),
+      );
+      const cellDir = dyno.sub(dyno.mul(dyno.hashVec3(cellId), c(2)), ONE3);
+      const cellPhase = dyno.hashFloat(dyno.add(cellId, c(7.0)));
+      const vfOsc = dyno.sin(dyno.mul(dyno.add(dyno.mul(U.time, U.vfSpd), cellPhase), c(2 * Math.PI)));
+      const vfEff = dyno.mul(dyno.mul(U.vfAmt, pickMask("vfAmt")), waveMul);
+      center = dyno.add(center, dyno.mul(dyno.mul(cellDir, dyno.mul(ONE3, vfOsc)), vfEff));
+    }
 
     /* --- displace by colour (Phase 3d) — luma or hue, along one world axis
        Reads the RAW un-tinted splat colour (rgba0), not the tint/sat-
@@ -3146,6 +3234,9 @@ const SPEC = [
   ["dpAmt", 2, "depth"], ["dpNear", 2, "depth"], ["dpFar", 2, "depth"],
   ["smearAmt", 1, "smear"], ["smearAngle", 0, "smear"],
   ["vigAmt", 2, "frame"], ["vigRadius", 2, "frame"], ["vigSoft", 2, "frame"],
+  ["crtAmt", 2, "frame"], ["crtLines", 0, "frame"], ["crtFringe", 2, "frame"],
+  ["vfAmt", 3, "fracture"], ["vfCell", 3, "fracture"], ["vfSpd", 2, "fracture"],
+  ["bgHue", 3, "bg"], ["bgSat", 2, "bg"], ["bgLum", 2, "bg"],
   ["frFill", 3, "frame"], ["frBorder", 2, "frame"], ["frJitter", 2, "frame"],
   ["frRadius", 3, "frame"], ["frTilt", 2, "frame"],
   ["grainAmt", 3, "grain"], ["grainSize", 1, "grain"], ["grainColor", 2, "grain"],
@@ -4390,6 +4481,10 @@ function pushUniforms() {
   U.ptIso.value   = V.ptIso;
   U.ptDot.value   = ptDotSize(V.ptSize) * radius;
   U.ptJit.value   = V.ptJit;
+  U.vfAmt.value   = V.vfAmt * radius;
+  U.vfCell.value  = Math.max(V.vfCell * radius, 1e-4);
+  U.vfSpd.value   = V.vfSpd;
+  applyBgColor();
   U.dAmt.value    = V.dAmt * radius;
   U.dFrq.value    = V.dFrq / Math.max(radius, 1e-6);
   U.dSpd.value    = V.dSpd;
@@ -4456,6 +4551,9 @@ function pushUniforms() {
   postMat.uniforms.vigAmt.value     = V.vigAmt;
   postMat.uniforms.vigRadius.value  = V.vigRadius;
   postMat.uniforms.vigSoft.value    = V.vigSoft;
+  postMat.uniforms.crtAmt.value     = V.crtAmt;
+  postMat.uniforms.crtLines.value   = V.crtLines;
+  postMat.uniforms.crtFringe.value  = V.crtFringe;
   postMat.uniforms.grainAmt.value   = V.grainAmt;
   postMat.uniforms.grainSize.value  = V.grainSize;
   postMat.uniforms.grainColor.value = V.grainColor;
@@ -6631,7 +6729,7 @@ $("render").onclick = async () => {
    follow. */
 const PRESET_FORMAT = "gausseous-preset";
 const PRESET_FORMAT_LEGACY = "splat-bench-preset";
-const PRESET_VERSION = 8;   // v2 selects; v3 audio; v4 regions+mask; v5 camera keyframes; v6 depth of field re-expressed; v7 points, lights, timeline length, hit source; v8 mesh
+const PRESET_VERSION = 9;   // v2 selects; v3 audio; v4 regions+mask; v5 camera keyframes; v6 depth of field re-expressed; v7 points, lights, timeline length, hit source; v8 mesh; v9 fracture, CRT, background hue
 /* `mobileMode` is deliberately absent: it is a property of the device you are
    sitting at, not of the look. A preset saved on a desktop must not force a
    phone back to full pixel ratio, nor the reverse. */
@@ -6738,6 +6836,9 @@ function applyPreset(o) {
     for (const [id, , g] of SPEC) {
       if ((g === "points" || g === "lights") && id !== "blurAmount") setParam(id, parseFloat(DEFAULT[id]));
     }
+  }
+  if (o.version < 9) {   // and fracture, CRT and background hue, which v9 added
+    for (const [id] of SPEC) if (/^(vf|crt|bg)[A-Z]/.test(id)) setParam(id, parseFloat(DEFAULT[id]));
   }
   if (o.version < 8) {   // likewise the mesh, which v8 added
     for (const [id] of SPEC) if (id.startsWith("msh")) setParam(id, parseFloat(DEFAULT[id]));
@@ -7644,7 +7745,7 @@ function revealParam(id) {
  * look means the same thing twice. Camera, transform, masks, film, frame,
  * grain and length are never touched.
  * ------------------------------------------------------------------ */
-const LOOK_GROUPS = ["points", "lights", "colour", "displace", "quantise", "wave", "smear"];
+const LOOK_GROUPS = ["points", "lights", "colour", "displace", "fracture", "quantise", "wave", "smear"];
 const LOOKS = [
   { id: "clean", name: "Clean", hint: "Resets Points, Lights, Colour and Motion, and their mappings." },
   { id: "points", name: "Point cloud", hint: "Every splat a small dot; low band breathes the dot size.",

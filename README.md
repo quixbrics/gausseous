@@ -57,8 +57,8 @@ tab.
 | Tab | Sections |
 |---|---|
 | **Scene** | Camera · Transform · Opacity · Masks |
-| **Look** | Starting look · Points · Lights · Colour · Depth · Optics · Film · Frame · Grain |
-| **Motion** | Noise · Quantise · Wave · Smear |
+| **Look** | Starting look · Background · Points · Lights · Colour · Depth · Optics · Film · Frame · Grain |
+| **Motion** | Noise · Fracture · Quantise · Wave · Smear |
 | **Audio** | Meters · Mappings |
 | **Export** | Output · Preset · Viewport |
 
@@ -129,6 +129,10 @@ Most effects are a single `dyno.dynoBlock` running in one GPU pass as an
   random — each link draws on as it arrives — and is deterministic, so it can be
   keyed or mapped to audio and exports as previewed. The mesh sits at the splats'
   rest positions: Noise, Quantise and Wave move the points, not the mesh.
+- **Fracture** (Motion tab) — Voronoi-style cells from FX Bench: the capture is
+  cut into chunks on a grid (keyed to rest positions, so a chunk stays a chunk)
+  and each chunk moves as a whole along its own direction and phase. Maskable,
+  and swept by the Wave like Noise.
 - **Noise** — `sin()` or curl field over swizzled center × per-splat random direction
 - **Opacity** — per-splat cull by minimum opacity and maximum scale
 - **Colour** — brightness, RGB tint, saturation
@@ -158,6 +162,12 @@ blur). Smear stretches each splat's projected shape along a screen-space
 direction using the same covariance-plus-energy-correction machinery, so the
 two compose through a single alpha correction.
 
+**Background** (top of the Look tab) — Void, Black, White, Mid grey, Chroma
+green, or **Hue**, whose hue / saturation / brightness can be keyed or mapped to
+audio. Depth fade fades toward it. **CRT** (in Frame) — scanlines counted per
+frame height, so exports match the preview at any resolution, plus a colour
+fringe that grows toward the edges.
+
 **Starting looks** (top of the Look tab, and the Next card): Clean, Point
 cloud, Band lanterns, Kick flash, Etched, Drift. Each resets the Points,
 Lights, Colour and Motion sections and their mappings, then sets a few
@@ -182,7 +192,7 @@ curve. Exports honour envelopes.
 camera keys, gesture bindings, audio mappings, timeline length — as a small
 text file. The splat and the audio are referenced by name only, not embedded,
 so load your capture first and then the preset. Drop a `.json` on the viewport
-to load it. Preset format v8; older presets still load, with any features they predate (Points, Lights, Mesh) reset.
+to load it. Preset format v9; older presets still load, with any features they predate (Points, Lights, Mesh, Fracture, CRT, background hue) reset.
 
 Keep the tab visible while exporting — Chrome throttles background timers to
 ~1s, which slows the render to roughly a frame per second.
