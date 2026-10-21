@@ -164,7 +164,11 @@ two compose through a single alpha correction.
 
 **Background** (top of the Look tab) — Void, Black, White, Mid grey, Chroma
 green, or **Hue**, whose hue / saturation / brightness can be keyed or mapped to
-audio. Depth fade fades toward it. **CRT** (in Frame) — scanlines counted per
+audio. Depth fade fades toward it. **On hits**: *step hue* (each detected hit
+moves the hue on by **Hit hue shift** and holds it until the next), *black ↔
+white* (alternates on every hit), or *flash* (jumps toward a shifted hue and fades
+over **Flash fade**). Hits are counted from the analysed track, so a held colour
+scrubs and exports exactly. **CRT** (in Frame) — scanlines counted per
 frame height, so exports match the preview at any resolution, plus a colour
 fringe that grows toward the edges.
 
@@ -192,7 +196,7 @@ curve. Exports honour envelopes.
 camera keys, gesture bindings, audio mappings, timeline length — as a small
 text file. The splat and the audio are referenced by name only, not embedded,
 so load your capture first and then the preset. Drop a `.json` on the viewport
-to load it. Preset format v9; older presets still load, with any features they predate (Points, Lights, Mesh, Fracture, CRT, background hue) reset.
+to load it. Preset format v10; older presets still load, with any features they predate (Points, Lights, Mesh, Fracture, CRT, background hue) reset.
 
 Keep the tab visible while exporting — Chrome throttles background timers to
 ~1s, which slows the render to roughly a frame per second.

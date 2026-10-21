@@ -933,6 +933,22 @@
       <div class="row" title="0 is black, 1 is white."><label>Brightness</label><output id="o-bgLum">—</output>
         <input type="range" id="p-bgLum" min="0" max="1" step="0.01" value="0.12"></div>
     </div>
+    <div class="btns" style="margin:9px 0">
+      <select id="bgHitMode" title="What the background does on each detected hit (the audio's Hit source). Step and Black ↔ white count hits and HOLD the colour until the next one; Flash jumps and fades. Counted from the analysed track, so scrubbing and export agree.">
+        <option value="off" selected>On hits: nothing</option>
+        <option value="step">On hits: step hue</option>
+        <option value="bw">On hits: black ↔ white</option>
+        <option value="flash">On hits: flash</option>
+      </select>
+    </div>
+    <div id="bgHitRows">
+      <div class="row" title="Step: how far the hue moves on each hit (0.5 alternates between a hue and its complement; 0.33 cycles three colours). Flash: the hue of the flash, relative to the background's own hue."><label>Hit hue shift</label><output id="o-bgHitStep">—</output>
+        <input type="range" id="p-bgHitStep" min="0" max="1" step="0.005" value="0.33"></div>
+      <div class="row" title="Flash only: how far toward the flash colour each hit goes."><label>Flash strength</label><output id="o-bgFlash">—</output>
+        <input type="range" id="p-bgFlash" min="0" max="1" step="0.01" value="0.7"></div>
+      <div class="row" title="Flash only: how long the flash takes to fade, in milliseconds."><label>Flash fade (ms)</label><output id="o-bgFade">—</output>
+        <input type="range" id="p-bgFade" min="20" max="2000" step="10" value="250"></div>
+    </div>
     <p style="color:var(--ink-dim); margin:8px 0 0">Additive lights and an additive mesh glow on dark backgrounds and wash out on light ones; for a white background, set the Mesh to Normal blend and Black.</p>
   </details>
 
@@ -1551,11 +1567,41 @@ stage.appendChild(renderer.domElement);
 const BG_COLORS = { void: 0x08090b, black: 0x000000, grey: 0x808080, white: 0xffffff, chroma: 0x00ff00 };
 const _bgC = new THREE.Color();
 let _bgKey = "";
+/* Hits counted up to `seconds` on the timeline, from the analysed onset
+   times — a pure function of the playhead, so a held colour scrubs and
+   exports exactly. A looping track adds its whole hit count per pass. */
+function hitCountAt(seconds) {
+  const ht = audioEnv?.hit?.hitTimes;
+  if (!ht || !ht.length || !(audioDur > 0)) return 0;
+  let passes = 0, t = seconds;
+  if (audioLoop) { passes = Math.floor(t / audioDur); t -= passes * audioDur; }
+  else t = Math.min(t, audioDur);
+  let lo = 0, hi = ht.length;                 // first index with time > t
+  while (lo < hi) { const m = (lo + hi) >> 1; if (ht[m] <= t + 1e-9) lo = m + 1; else hi = m; }
+  return passes * ht.length + lo;
+}
+const _bgF = new THREE.Color();
 function applyBgColor() {
-  const sel = $("bgColor").value;
-  $("bgHueRows").style.display = sel === "hue" ? "" : "none";
-  if (sel === "hue") _bgC.setHSL(V.bgHue ?? 0.6, V.bgSat ?? 0.35, V.bgLum ?? 0.12);
+  const sel = $("bgColor").value, hm = $("bgHitMode").value;
+  $("bgHueRows").style.display = sel === "hue" || hm === "step" || hm === "flash" ? "" : "none";
+  $("bgHitRows").style.display = hm === "off" ? "none" : "";
+  const hue = V.bgHue ?? 0.6, sat = V.bgSat ?? 0.35, lum = V.bgLum ?? 0.12;
+  if (sel === "hue") _bgC.setHSL(hue, sat, lum);
   else _bgC.setHex(BG_COLORS[sel] ?? BG_COLORS.void);
+  if (hm !== "off" && audioEnv?.hit) {
+    const seconds = playhead * (V.dur ?? P.dur);
+    if (hm === "step") {
+      const n = hitCountAt(seconds);
+      _bgC.setHSL(((hue + n * (V.bgHitStep ?? 0.33)) % 1 + 1) % 1, sat, lum);
+    } else if (hm === "bw") {
+      _bgC.setHex(hitCountAt(seconds) % 2 ? 0xffffff : 0x000000);
+    } else if (hm === "flash") {
+      const env = shapedEnvelope("hit", { attack: 0, release: V.bgFade ?? 250, gain: 1, floor: 0, curve: 1 });
+      const lvl = env ? sampleArr(env, seconds) : 0;
+      _bgF.setHSL(((hue + (V.bgHitStep ?? 0.33)) % 1 + 1) % 1, Math.max(sat, 0.6), Math.max(lum, 0.55));
+      _bgC.lerp(_bgF, Math.min(1, lvl * (V.bgFlash ?? 0.7)));
+    }
+  }
   const key = sel + _bgC.getHexString();
   if (key === _bgKey) return;          // called from every pushUniforms(); only act on a change
   _bgKey = key;
@@ -1578,6 +1624,10 @@ function applyBgColor() {
   mesh?.updateVersion();
 }
 $("bgColor").onchange = applyBgColor;
+$("bgHitMode").onchange = () => {
+  if (!audioEnv) setStatus("Background hits need audio with hits in it — load a track.", true);
+  applyBgColor();
+};
 for (const id of ["dField", "dcMode", "dcAxis", "qAxis", "wMode", "dpMode", "frAspect"]) $(id).onchange = () => pushUniforms();
 $("dofFocusSrc").onchange = () => updateDofFocus();
 
@@ -3237,6 +3287,7 @@ const SPEC = [
   ["crtAmt", 2, "frame"], ["crtLines", 0, "frame"], ["crtFringe", 2, "frame"],
   ["vfAmt", 3, "fracture"], ["vfCell", 3, "fracture"], ["vfSpd", 2, "fracture"],
   ["bgHue", 3, "bg"], ["bgSat", 2, "bg"], ["bgLum", 2, "bg"],
+  ["bgHitStep", 3, "bg"], ["bgFlash", 2, "bg"], ["bgFade", 0, "bg"],
   ["frFill", 3, "frame"], ["frBorder", 2, "frame"], ["frJitter", 2, "frame"],
   ["frRadius", 3, "frame"], ["frTilt", 2, "frame"],
   ["grainAmt", 3, "grain"], ["grainSize", 1, "grain"], ["grainColor", 2, "grain"],
@@ -3561,6 +3612,7 @@ function onsetEnvelope(env) {
     for (let j = i; j < n && a > 1e-3; j++, a *= decay) out[j] = Math.max(out[j], a);
   }
   out.hits = hits.length;
+  out.hitTimes = Float64Array.from(hits, ([i]) => i / ENV_RATE);   // seconds, ascending — for hit counting
   return out;
 }
 
@@ -6729,13 +6781,13 @@ $("render").onclick = async () => {
    follow. */
 const PRESET_FORMAT = "gausseous-preset";
 const PRESET_FORMAT_LEGACY = "splat-bench-preset";
-const PRESET_VERSION = 9;   // v2 selects; v3 audio; v4 regions+mask; v5 camera keyframes; v6 depth of field re-expressed; v7 points, lights, timeline length, hit source; v8 mesh; v9 fracture, CRT, background hue
+const PRESET_VERSION = 10;   // v2 selects; v3 audio; v4 regions+mask; v5 camera keyframes; v6 depth of field re-expressed; v7 points, lights, timeline length, hit source; v8 mesh; v9 fracture, CRT, background hue; v10 background on hits
 /* `mobileMode` is deliberately absent: it is a property of the device you are
    sitting at, not of the look. A preset saved on a desktop must not force a
    phone back to full pixel ratio, nor the reverse. */
 const TOGGLES = ["useLod"];
 const SELECTS = ["res", "fps", "obAxis", "bgColor", "dField", "dcMode", "dcAxis", "qAxis", "wMode", "dpMode", "dofFocusSrc", "filmProfile", "frAspect",
-                 "mshTopo", "mshColor", "mshBlend", "mshGrow"];
+                 "mshTopo", "mshColor", "mshBlend", "mshGrow", "bgHitMode"];
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 function serialize() {
@@ -6837,6 +6889,7 @@ function applyPreset(o) {
       if ((g === "points" || g === "lights") && id !== "blurAmount") setParam(id, parseFloat(DEFAULT[id]));
     }
   }
+  if (o.version < 10 && typeof o.selects?.bgHitMode !== "string") $("bgHitMode").value = "off";
   if (o.version < 9) {   // and fracture, CRT and background hue, which v9 added
     for (const [id] of SPEC) if (/^(vf|crt|bg)[A-Z]/.test(id)) setParam(id, parseFloat(DEFAULT[id]));
   }
