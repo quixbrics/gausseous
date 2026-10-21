@@ -4,8 +4,7 @@
 
 A bespoke 3D Gaussian Splatting manipulator and animator for the browser.
 Arbitrary per-Gaussian programmable manipulation via Spark's `dyno` shader-graph
-system, with an eye toward parameter automation driven from outside (audio FFT,
-LFOs, OSC).
+system, driven by keyframes and by an audio track.
 
 Single file, no build step, no npm install. Dependencies are CDN imports via an
 importmap: [three](https://threejs.org) 0.180,
@@ -34,50 +33,125 @@ after editing, or serve with no-store headers:
 python3 -c "import http.server; H=http.server.SimpleHTTPRequestHandler; _e=H.end_headers; H.end_headers=lambda s:(s.send_header('Cache-Control','no-store'),_e(s)); http.server.test(HandlerClass=H,port=8000)"
 ```
 
-## Control groups
+## First session
 
-The rail is one accordion, in pipeline order — what the splat *is*, then what is
-done to it, then how it leaves:
+1. Load a splat (drop it on the viewport, **Choose file**, or **Load test asset**).
+2. A **Next** card offers audio (**Test audio** loads `bandtest.wav`) and a
+   **starting look**. Loading audio sets the timeline to the track's length and
+   loops it.
+3. Press **Play**. To make more things move with the sound, arm a band under
+   **Map** in the transport bar and click any slider.
 
-**Camera** · **Transform** · **Opacity** · **Masks** · **Depth** · **Colour** ·
-**Noise** · **Quantise** · **Wave** · **Smear** · **Audio** · **Output** ·
-**Preset** · **Viewport**
+Dismiss the card with ×; the same things live in the transport bar and the Look
+tab.
+
+## Layout
+
+- **Transport** (bottom): the scrub bar with the track's waveform behind it;
+  Play, the audio file, the **Map** band chips, the clock, **Length** and Render.
+- **Lane** (above the transport): the focused parameter's keyframe curve, its
+  audio mapping, mask and gesture binding. The waveform is drawn faintly behind
+  the curve.
+- **Rail** (right): five tabs.
+
+| Tab | Sections |
+|---|---|
+| **Scene** | Camera · Transform · Opacity · Masks |
+| **Look** | Starting look · Points · Lights · Colour · Depth · Optics · Film · Frame · Grain |
+| **Motion** | Noise · Quantise · Wave · Smear |
+| **Audio** | Meters · Mappings |
+| **Export** | Output · Preset · Viewport |
+
+A tab shows a count when parameters inside it are driven by keyframes or
+audio, and a dot when something is changed from its default.
+
+## Timeline length
+
+**Length** in the transport bar replaces the old Duration slider (Camera) and
+the Loop / “× set” controls (Audio):
+
+- **Seconds** — set the length directly.
+- **Track ×** — a whole number of track lengths, so the audio loops cleanly.
+  This is what a first audio load picks.
+- **Bars** — bars × beats at a BPM (typed or tapped), with a beat grid on the
+  lane and scrub bar and the bar.beat position on the clock. Tempo is entered
+  rather than detected: detection on field recordings is unreliable.
+
+**Loop** repeats a track that is shorter than the timeline, in the preview, the
+envelope lookup and the exported audio alike. Camera Orbit turns and the light
+rig's Orbit both count per timeline loop, so whole numbers are seamless.
+
+## Audio
+
+The file is analysed offline into band envelopes rather than sampled live, so
+scrubbing, playback and export all agree. Four sources:
+
+- **Low / Mid / High** — loudness in 20–200 Hz, 200 Hz–2 kHz, 2–16 kHz.
+- **Hit** — a short pulse on each detected onset (drum, pluck, transient),
+  whatever its frequency. Material without clear transients gives few hits.
+
+**Mapping.** Arm a band under **Map** (transport bar), then click any slider in
+the rail — the slider does not move, it gains a coloured band tag. Click a
+mapped slider again to unmap; **Esc** finishes. Every mapping is listed under
+**Audio → Mappings** with its depth, smoothing and a remove button; clicking a
+name jumps to the control. Depth is a fraction of the control's whole range
+(negative pushes it down). Audio adds on top of the slider and any keyframes.
+
+**Smoothing presets** — Punchy, Smooth, Swell, Gate — set attack, release,
+gain, floor and curve together. The lane's **Shape ▾** still exposes every
+field, plus lag (negative lag lands an effect on the beat rather than after it).
+
+The old way in still works: click a parameter's name to focus it in the lane
+and pick a band there.
 
 ## Effects
 
 Most effects are a single `dyno.dynoBlock` running in one GPU pass as an
 `objectModifier` on the `SplatMesh`:
 
-- **Noise** — `sin()` field over swizzled center × per-splat random direction
+- **Points** — the point-cloud morph (from Fractured / FX Bench): blends every
+  splat toward one uniform dot. **Point size** is log-mapped (FX Bench's
+  measured range); **Size jitter** adds stable per-splat variation; **Antialias
+  floor** is Spark's `blurAmount`, lowered to keep sub-pixel dots alive.
+  Maskable. The dots are still Gaussians, so small ones thin and darken the
+  image — compensate with Opacity × all, deliberately not automatically.
+- **Noise** — `sin()` or curl field over swizzled center × per-splat random direction
 - **Opacity** — per-splat cull by minimum opacity and maximum scale
 - **Colour** — brightness, RGB tint, saturation
 - **Masks** — a per-splat SDF edit: cut, crop or colorize inside a
-  sphere / box / ellipsoid / cylinder / capsule / plane, in six slots. Any of
-  Noise / Saturation / Tint / Opacity can be scoped to a slot via its own
-  **Mask** control in the lane.
+  sphere / box / ellipsoid / cylinder / capsule / plane, in six slots. Noise /
+  Saturation / Tint / Opacity / Point cloud can be scoped to a slot via the
+  lane's **Mask** control.
 - **Quantise**, **Wave** — voxel snap and index-phase sweep
 
-**Depth** and **Smear** are different: they run in Spark's own vertex shader at
-rasterisation time, not in the dyno graph. Depth carries both depth fade (aerial
-perspective, in the dyno pass) and depth of field (per-splat circle-of-confusion
+**Lights** (from FX Bench, phases Q–T) run in Spark's splat vertex shader, not
+the dyno graph, so they move every frame without re-baking. Three point lights
+are *added* to the capture: **Darken capture** pulls the baked light down,
+**Glow** blends between lighting the splats and glowing regardless of what they
+fall on. Each light has a band chip in its header (its intensity follows that
+band), **Place** (then click the model), and a draggable numbered marker on the
+viewport while the section is open. **Shading** turns on facing-dependent light
+using surface directions estimated from neighbouring splat centres in a
+background worker (a few seconds on large captures); **Rim** adds edge light.
+**Orbit** turns the whole rig per timeline loop. Limits: it cannot remove light
+baked into a capture, so bright overcast scans respond weakly; shading only
+helps on flat-ish surfaces; masks cannot scope lights; strong lights clip
+before the Film pass. Amount 0 is an exact bypass.
+
+**Depth** and **Smear** also run in Spark's vertex shader. Depth carries depth
+fade (in the dyno pass) and depth of field (per-splat circle-of-confusion
 blur). Smear stretches each splat's projected shape along a screen-space
-direction using the same covariance-plus-energy-correction machinery, so the two
-compose through a single alpha correction.
+direction using the same covariance-plus-energy-correction machinery, so the
+two compose through a single alpha correction.
 
-**Audio** drives any parameter from a track's low / mid / high content. The file is
-analysed offline into per-band envelopes rather than sampled live, so scrubbing,
-playback and export all agree. Click a parameter's name to focus it, then pick a band
-in the lane. Audio layers on top of envelopes rather than replacing them.
-
-**Loop** repeats a track that is shorter than the timeline, in the preview, the
-envelope lookup and the exported audio alike. **Duration × N** sets the timeline
-to exactly N track lengths, so a loop never lands mid-bar.
+**Starting looks** (top of the Look tab, and the Next card): Clean, Point
+cloud, Band lanterns, Kick flash, Etched, Drift. Each resets the Points,
+Lights, Colour and Motion sections and their mappings, then sets a few
+controls and mappings. Camera, transform, masks, film and length are kept.
 
 **Adjust** binds up to two parameters to the drag axes so you can change them on
 the viewport itself, with the splat visible. Focus a parameter, bind X or Y in
 the lane header, then drag. Each axis takes an optional sub-range and invert.
-Useful on desktop, essential on a phone where the control rail covers the
-subject.
 
 Every parameter has a `↺` reset button, which brightens when the value differs
 from its default, and a `◆` keyframe button.
@@ -91,9 +165,10 @@ the slider itself to auto-key. Armed sliders become live readouts of their
 curve. Exports honour envelopes.
 
 **Save JSON** writes the whole editable state — parameters, envelopes, toggles,
-camera keys, gesture bindings — as a small text file. The splat is referenced by
-name only, not embedded, so load your capture first and then the preset. Drop a
-`.json` on the viewport to load it.
+camera keys, gesture bindings, audio mappings, timeline length — as a small
+text file. The splat and the audio are referenced by name only, not embedded,
+so load your capture first and then the preset. Drop a `.json` on the viewport
+to load it. Preset format v7; v1–v6 presets still load.
 
 Keep the tab visible while exporting — Chrome throttles background timers to
 ~1s, which slows the render to roughly a frame per second.
@@ -103,14 +178,16 @@ Keep the tab visible while exporting — Chrome throttles background timers to
 Splat captures are gitignored, with one deliberate exception: `3_3_2025.ply`
 (~11 MB, 44,296 gaussians) is committed as the test asset, so the repo is
 runnable as cloned without needing to source a capture separately.
+`bandtest.wav` is the test audio.
 
 ## Mobile
 
 The rail becomes a bottom sheet on narrow or touch screens, with larger touch
 targets. A **Mobile profile** toggle (on by default there) caps the pixel ratio
 and forces level-of-detail on load; it caps rather than redefines, and the OSD
-reports the pixel ratio actually being rendered. Video export needs WebCodecs,
-so the Render button is disabled on browsers without it (including iOS Safari).
+reports the pixel ratio actually being rendered. Arming a Map band opens the
+sheet. Video export needs WebCodecs, so the Render button is disabled on
+browsers without it (including iOS Safari).
 
 ## Debugging
 

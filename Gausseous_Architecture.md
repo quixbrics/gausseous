@@ -9,7 +9,7 @@ and no backend — everything runs client-side, in the tab.
 | Layer | Choice |
 |---|---|
 | Language / runtime | Vanilla JavaScript (ES modules), no framework |
-| Delivery | One `.html` file, ~6,400 lines. No build step, no `npm install` |
+| Delivery | One `.html` file, ~7,800 lines. No build step, no `npm install` |
 | Dependencies | Loaded at runtime via an `<script type="importmap">` from CDN — no bundler needed |
 | 3D engine | [three.js](https://threejs.org) 0.180 — scene graph, camera, orbit controls, transform gizmo |
 | Splat rendering | [Spark](https://sparkjs.dev) 2.1.0 — a 3D Gaussian Splatting renderer built on three.js, including its `dyno` GPU shader-graph system |
@@ -59,6 +59,18 @@ per-splat screen-space projection and the circle-of-confusion blur — a
 defocused splat is just a wider, dimmer Gaussian, so it composites
 through the existing alpha-blended sort with no special handling.
 
+### Lights
+
+Three additive point lights (ported from the FX Bench testbed) are a
+second patch into the same Spark vertex shader, at the point where each
+splat's colour is final. They move every frame, so they live there rather
+than in the dyno graph, where every change would re-bake the packed
+buffer. The light rig is a pure function of the parameters and the
+playhead, so it scrubs and exports deterministically. Facing-dependent
+shading and rim light use per-splat surface directions estimated from the
+k nearest splat centres (PCA, planarity as confidence) in a pool of Web
+Workers, uploaded as a data texture indexed by the original splat index.
+
 ### Post-processing pass
 
 After the raster pass, a single fullscreen shader handles everything
@@ -88,6 +100,12 @@ hand.
   band with its own attack/release/gain shaping.
 - **Camera**: manual orbit, a keyframed path (Catmull-Rom interpolation
   between camera poses), or a generated turntable orbit.
+
+- **Audio sources**: three filtered bands plus an onset (`hit`) pulse
+  derived offline from them. Mappings are made by arming a band and
+  clicking sliders, and listed together in the Audio tab.
+- **Timeline length**: seconds, a whole number of track lengths, or bars
+  at a BPM; the latter two keep looping audio seamless.
 
 ### Export
 

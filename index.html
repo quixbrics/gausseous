@@ -20,7 +20,7 @@
        glance without competing with --signal (values) or --live (transport). */
     --edit:#b48ce8;
     --rail:340px;
-    --dock:64px;
+    --dock:86px;
     /* --lane-extra is JS-driven (updateLaneHeight()) — grows to fit whichever
        disclosure panels (Audio shaping, Gesture range) are currently open,
        rather than letting their content overflow the lane's own fixed box
@@ -53,8 +53,10 @@
   #transport{
     position:fixed; left:0; right:var(--rail); bottom:0; height:var(--dock);
     background:var(--chassis); border-top:1px solid var(--rule);
-    display:flex; align-items:center; gap:14px; padding:0 16px;
+    display:flex; flex-direction:column; justify-content:center; gap:4px; padding:4px 16px 8px;
   }
+  #tbar{display:flex; align-items:center; gap:10px}
+  #tbar .sp{flex:1}
 
   /* Envelope lane ---------------------------------------------------- */
   #lane{
@@ -69,7 +71,11 @@
   }
   #laneRange{color:var(--rule); font-variant-numeric:tabular-nums; font-size:10px}
   #laneHead .sp{flex:1}
-  #laneHead button{padding:1px 7px; font-size:10px}
+  #laneHead button{padding:1px 7px; font-size:10px; white-space:nowrap}
+  #laneHead{overflow-x:auto; scrollbar-width:none}
+  #laneHead::-webkit-scrollbar{display:none}
+  #laneHead > *{flex:0 0 auto}
+  #laneName{max-width:220px; overflow:hidden; text-overflow:ellipsis}
   #laneHead .lsep{width:1px; height:12px; background:var(--rule)}
   #laneHead .audlbl{color:var(--ink-dim); letter-spacing:.06em; font-size:10px}
   #laneHead select{padding:1px 4px; font-size:10px}
@@ -384,6 +390,112 @@
   #kbdPanel td:last-child{color:var(--ink-dim)}
   #kbdPanel p{margin:14px 0 0; color:var(--ink-dim); font-size:11px}
 
+  /* Tabs ------------------------------------------------------------- */
+  #tabs{display:flex; border-bottom:1px solid var(--rule); position:sticky; top:0; z-index:2; background:var(--chassis)}
+  #tabs button{flex:1; border:0; border-radius:0; background:none; padding:11px 2px 10px; font-size:10px;
+    letter-spacing:.14em; color:var(--ink-dim); border-bottom:2px solid transparent}
+  #tabs button:hover{color:var(--ink)}
+  #tabs button.on{color:var(--signal); border-bottom-color:var(--signal)}
+  .tflag{font-style:normal; color:var(--edit); margin-left:3px; letter-spacing:0}
+  #rail[data-tab="scene"]  :is(.mod,.tabintro):not([data-tab="scene"]),
+  #rail[data-tab="look"]   :is(.mod,.tabintro):not([data-tab="look"]),
+  #rail[data-tab="motion"] :is(.mod,.tabintro):not([data-tab="motion"]),
+  #rail[data-tab="audio"]  :is(.mod,.tabintro):not([data-tab="audio"]),
+  #rail[data-tab="export"] :is(.mod,.tabintro):not([data-tab="export"]){display:none}
+  .tabintro{padding:12px 16px; border-bottom:1px solid var(--rule)}
+  .tabintro select{width:100%}
+  .row.flash{animation:rowFlash .9s ease-out}
+  @keyframes rowFlash{0%{background:rgba(180,140,232,.28)} 100%{background:transparent}}
+
+  /* Transport -------------------------------------------------------- */
+  .audbtn{max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-transform:none; letter-spacing:.02em}
+  .audbtn.loaded{color:var(--signal); border-color:var(--rule)}
+  #mapChips{display:flex; align-items:center; gap:3px}
+  #mapChips .maplbl{color:var(--ink-dim); font-size:9px; letter-spacing:.12em; text-transform:uppercase; margin-right:3px}
+  #mapChips button{padding:4px 6px; font-size:9px}
+  #mapChips button.on{color:var(--void); background:var(--bandc); border-color:var(--bandc)}
+  #scrubWrap{position:relative; height:30px; display:flex; align-items:center}
+  #wave{position:absolute; inset:0; width:100%; height:100%; pointer-events:none}
+  #scrubWrap #scrub{position:relative; width:100%; margin:0}
+  #lenBtn{text-transform:none; letter-spacing:.03em; white-space:nowrap}
+  #lenPop{position:fixed; z-index:30; right:calc(var(--rail) + 12px); bottom:calc(var(--dock) + 8px); width:300px;
+    background:var(--chassis); border:1px solid var(--rule); padding:12px 14px; box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  #lenPop.hide{display:none}
+  .lenhead{color:var(--signal); font-size:10px; letter-spacing:.2em; text-transform:uppercase; margin-bottom:9px}
+  .seg{margin-bottom:10px}
+  .seg button{flex:1}
+  .lenpane{display:none; margin-bottom:6px}
+  .lenpane.on{display:block}
+  .lenrow{display:flex; align-items:center; gap:6px; margin-bottom:7px}
+  .lenrow label{color:var(--ink-dim); min-width:72px}
+  .lenrow input[type=number]{width:62px}
+  .lenrow button{padding:4px 9px}
+  .leninfo{color:var(--ink-dim); margin:4px 0 8px}
+  /* Band colours — a fourth accent family, used only for audio sources. */
+  :root{--b-low:#ff9c6b; --b-mid:#f2cf6b; --b-high:#86c8ff; --b-hit:#ff6fc8}
+  [data-band="low"]{--bandc:var(--b-low)} [data-band="mid"]{--bandc:var(--b-mid)}
+  [data-band="high"]{--bandc:var(--b-high)} [data-band="hit"]{--bandc:var(--b-hit)}
+  .rtag{display:inline-block; margin-left:6px; padding:0 4px; font-size:9px; line-height:13px; border-radius:2px;
+    color:var(--void); background:var(--bandc); letter-spacing:.06em; text-transform:uppercase; vertical-align:1px}
+  body.mapping #rail .row:has(input[type=range][id^="p-"]:not(:disabled)){outline:1px dashed var(--bandc); outline-offset:3px; cursor:copy}
+  body.mapping #rail .row *{cursor:copy}
+  body.mapping{--bandc:var(--signal)}
+  body.mapping[data-mapband="low"]{--bandc:var(--b-low)} body.mapping[data-mapband="mid"]{--bandc:var(--b-mid)}
+  body.mapping[data-mapband="high"]{--bandc:var(--b-high)} body.mapping[data-mapband="hit"]{--bandc:var(--b-hit)}
+  /* Mappings list */
+  #routeList:empty::before{content:"No mappings yet."; color:var(--ink-dim)}
+  .rrow{display:grid; grid-template-columns:1fr auto auto 18px; gap:5px 6px; align-items:center;
+    padding:6px 0; border-bottom:1px solid var(--rule)}
+  .rrow .rname{grid-column:1 / -1; text-align:left; background:none; border:0; padding:0; text-transform:none;
+    letter-spacing:.02em; color:var(--ink); display:flex; gap:6px; align-items:baseline}
+  .rrow .rname em{font-style:normal; color:var(--ink-dim); font-size:10px}
+  .rrow .rname:hover{color:var(--signal)}
+  .rrow select{padding:2px 4px; font-size:10px}
+  .rrow input[type=range]{width:100%; margin:0}
+  .rrow output{color:var(--signal); font-variant-numeric:tabular-nums; min-width:36px; text-align:right}
+  .rrow .rdel{padding:0; width:18px; height:18px; line-height:16px; text-align:center}
+  .rrow .rdepth{grid-column:1 / 3; display:grid; grid-template-columns:1fr 40px; gap:6px; align-items:center}
+  /* Start card */
+  #startCard{position:absolute; right:12px; top:12px; width:280px; z-index:19; background:rgba(16,18,22,.94);
+    border:1px solid var(--rule); padding:10px 12px 12px}
+  #startCard.hide{display:none}
+  .sc-head{display:flex; justify-content:space-between; align-items:center; color:var(--signal);
+    font-size:10px; letter-spacing:.2em; text-transform:uppercase; margin-bottom:8px}
+  .sc-head button{padding:0 7px; font-size:14px; line-height:20px}
+  .sc-step{display:flex; gap:9px; margin-top:9px; color:var(--ink)}
+  .sc-step > b{color:var(--signal); font-weight:400; width:12px}
+  .sc-step .btns{margin-top:6px}
+  .sc-step .btns button{padding:4px 7px; font-size:10px}
+  .sc-step.done > b{color:var(--ink-dim)}
+  .sc-step.done > b::after{content:" \2713"}
+  .sc-opt{color:var(--ink-dim); font-size:10px}
+
+  /* Lights ------------------------------------------------------------ */
+  .ltcard{border-top:1px solid var(--rule); margin:12px -16px 0; padding:10px 16px 0}
+  .lthead{display:flex; align-items:center; gap:7px; margin-bottom:8px}
+  .lthead .ltname{color:var(--ink); letter-spacing:.1em; text-transform:uppercase; font-size:10px; flex:1}
+  .lthead select, .lthead button{padding:3px 7px; font-size:10px}
+  .ltsw{width:12px; height:12px; border-radius:50%; border:1px solid var(--rule); flex:0 0 auto}
+  .ltband.on{color:var(--signal); border-color:var(--signal)}
+  details.ltsub{margin:2px 0 6px}
+  details.ltsub > summary{cursor:pointer; color:var(--ink-dim); letter-spacing:.08em; text-transform:uppercase;
+    font-size:9px; list-style:none; padding:4px 0 6px}
+  details.ltsub > summary::-webkit-details-marker{display:none}
+  details.ltsub > summary::before{content:"+ "}
+  details.ltsub[open] > summary::before{content:"\2212  "}
+  input[type=range].hue::-webkit-slider-runnable-track{height:3px;
+    background:linear-gradient(to right,#f33,#fd3,#3f3,#3ff,#36f,#f3f,#f33)}
+  input[type=range].hue::-moz-range-track{height:3px;
+    background:linear-gradient(to right,#f33,#fd3,#3f3,#3ff,#36f,#f3f,#f33)}
+  #ltMarks{position:absolute; inset:0; pointer-events:none; overflow:hidden}
+  .ltmark{position:absolute; width:22px; height:22px; margin:-11px 0 0 -11px; border-radius:50%;
+    border:1.5px solid currentColor; background:rgba(8,9,11,.55); pointer-events:auto; cursor:grab;
+    display:flex; align-items:center; justify-content:center; font-size:10px; touch-action:none;
+    box-shadow:0 0 10px currentColor}
+  .ltmark.dim{opacity:.45}
+  .ltmark:active{cursor:grabbing}
+  body.hud-hidden #ltMarks{display:none}
+
   /* Mobile ------------------------------------------------------------
      Desktop is the target and none of the rules above are conditional on
      screen size, so this block can only ever subtract. The rail becomes a
@@ -394,7 +506,7 @@
     position:fixed; right:12px; top:12px; z-index:20;
   }
   @media (max-width: 900px), (pointer: coarse) {
-    :root{ --rail:0px; --dock:56px; --lane:calc(96px + var(--lane-extra)); }
+    :root{ --rail:0px; --dock:80px; --lane:calc(96px + var(--lane-extra)); }
     #panelToggle{ display:block }
     /* A phone has no keyboard and should not advertise one. */
     .kbd{ display:none }
@@ -414,8 +526,14 @@
     #laneHead::-webkit-scrollbar{ display:none }
     #osd{ font-size:9px; left:10px; top:10px }
     #osd b{ width:62px }
-    #transport{ gap:9px; padding:0 10px }
-    #clock{ min-width:96px; font-size:10px }
+    #transport{ padding:3px 8px 6px }
+    #tbar{ gap:5px }
+    #clock{ display:none }
+    .audbtn{ max-width:70px }
+    #mapChips .maplbl{ display:none }
+    #mapChips button{ padding:4px 4px }
+    #lenPop{ right:8px; left:8px; width:auto }
+    #startCard{ left:12px; right:12px; width:auto; top:52px }
     /* Touch targets: a 13px glyph is not tappable. */
     .rst, .key{ width:26px; height:26px; line-height:26px; font-size:15px; opacity:.75 }
     .row{ grid-template-columns:1fr auto auto 54px; margin-bottom:11px }
@@ -471,6 +589,15 @@
     <button id="focusToggle" aria-pressed="false" title="Tap the model to focus on what you tapped. Hold F to engage momentarily — release to return to whatever mode was active."><span class="lbl">Focus</span><span class="kbd"> (F)</span></button>
   </div>
   <div id="gestureHud" class="hide" aria-hidden="true" title="Tap a chip to unbind that axis"></div>
+  <div id="ltMarks" aria-hidden="true"></div>
+  <div id="startCard" class="hide" role="region" aria-label="Next steps">
+    <div class="sc-head"><span>Next</span><button type="button" id="scClose" title="Hide. Everything here also lives in the transport bar and the Look tab.">&times;</button></div>
+    <div class="sc-step" id="scAudio"><b>1</b><div>Add audio <span class="sc-opt">optional — sets the timeline length</span>
+      <div class="btns"><button type="button" id="scLoadAud">Load audio</button><button type="button" id="scTestAud">Test audio</button></div></div></div>
+    <div class="sc-step"><b>2</b><div>Pick a starting look
+      <div class="btns" id="scLooks"></div></div></div>
+    <div class="sc-step"><b>3</b><div>Map more: arm a band under <em>Map</em> in the transport bar, then click any slider.</div></div>
+  </div>
   <div id="drop">
     <h1>Gausseous</h1>
     <p>Drop a <strong>.ply</strong> / .spz / .splat / .sog file here — or tap <em>Choose file</em> —
@@ -497,10 +624,19 @@
       <option value="low">low</option>
       <option value="mid">mid</option>
       <option value="high">high</option>
+      <option value="hit">hit</option>
     </select>
     <input type="range" id="audDepth" min="-1" max="1" step="0.01" value="0"
            title="Modulation depth, as a fraction of the parameter's full range">
     <output id="o-audDepth">0.00</output>
+    <select id="audShapePreset" title="How the band's level is smoothed before it drives this control" disabled>
+      <option value="" hidden>—</option>
+      <option value="punchy">Punchy</option>
+      <option value="smooth">Smooth</option>
+      <option value="swell">Swell</option>
+      <option value="gate">Gate</option>
+      <option value="custom">Custom</option>
+    </select>
     <button id="audShapeToggle" title="Attack/release/lag/gain/floor/curve shaping" disabled>Shape ▾</button>
     <span class="lsep"></span>
     <label class="audlbl">Mask</label>
@@ -554,10 +690,44 @@
 </div>
 
 <div id="transport">
+  <div id="scrubWrap"><canvas id="wave"></canvas><input type="range" id="scrub" min="0" max="1" step="0.0005" value="0"></div>
+  <div id="tbar">
   <button id="play">Play</button>
-  <input type="range" id="scrub" min="0" max="1" step="0.0005" value="0">
+  <button id="audLoad" class="audbtn" title="Load an audio file — or drop one on the viewport. Loading sets the timeline to the track's length.">&#9835; Load audio</button>
+  <div id="mapChips" title="Map: arm a band, then click any slider in the panel to make that band drive it. Click a mapped slider again to unmap. Esc when done.">
+    <span class="maplbl">Map</span>
+    <button type="button" data-band="low">Low</button><button type="button" data-band="mid">Mid</button><button type="button" data-band="high">High</button><button type="button" data-band="hit">Hit</button>
+  </div>
+  <span class="sp"></span>
   <div id="clock">—</div>
+  <button id="lenBtn" title="Timeline length and loop">8.00 s ▾</button>
   <button id="render">Render</button>
+  </div>
+</div>
+
+<div id="lenPop" class="hide" role="dialog" aria-label="Timeline length">
+  <div class="lenhead">Timeline length</div>
+  <div class="btns seg" id="lenMode">
+    <button type="button" data-mode="seconds" title="Set the length directly">Seconds</button>
+    <button type="button" data-mode="track" title="A whole number of track lengths, so the audio loops cleanly">Track ×</button>
+    <button type="button" data-mode="bars" title="A number of bars at a tempo — also draws a beat grid on the lane">Bars</button>
+  </div>
+  <div class="lenpane" data-mode="seconds">
+    <div class="row"><label>Duration (s)</label><output id="o-dur">—</output>
+      <input type="range" id="p-dur" min="1" max="600" step="any" value="8"></div>
+  </div>
+  <div class="lenpane" data-mode="track">
+    <div class="lenrow"><label>Repeats</label><button type="button" id="trkDec">−</button><input type="number" id="trkN" min="1" max="64" step="1" value="1"><button type="button" id="trkInc">+</button></div>
+    <div class="leninfo" id="trkInfo">Load audio first.</div>
+  </div>
+  <div class="lenpane" data-mode="bars">
+    <div class="lenrow"><label>BPM</label><input type="number" id="bpm" min="20" max="300" step="0.1" value="120"><button type="button" id="tapBtn" title="Tap along with the beat, four or more times">Tap</button></div>
+    <div class="lenrow"><label>Bars</label><button type="button" id="barDec">−</button><input type="number" id="barsN" min="1" max="256" step="1" value="4"><button type="button" id="barInc">+</button></div>
+    <div class="lenrow"><label>Beats / bar</label><input type="number" id="beatsN" min="1" max="16" step="1" value="4"></div>
+    <div class="leninfo" id="barInfo"></div>
+  </div>
+  <label class="check"><input type="checkbox" id="loopChk"> Loop the audio to fill the timeline</label>
+  <p class="leninfo">Camera Orbit turns and the light rig's Orbit both count per timeline loop, so whole numbers stay seamless at the loop point.</p>
 </div>
 
 <aside id="rail">
@@ -568,9 +738,23 @@
        during parse (Spark exposes no decode-progress event) — see
        loadBarShow()/startParsePhase(). Hidden outside a load. -->
   <div id="loadBar" class="hide"><i></i></div>
+  <nav id="tabs" role="tablist" aria-label="Control groups">
+    <button type="button" role="tab" data-tab="scene" title="Camera, transform, opacity cull, masks">Scene<i class="tflag"></i></button>
+    <button type="button" role="tab" data-tab="look" title="Points, lights, colour, depth, optics, film, frame, grain">Look<i class="tflag"></i></button>
+    <button type="button" role="tab" data-tab="motion" title="Noise, quantise, wave, smear">Motion<i class="tflag"></i></button>
+    <button type="button" role="tab" data-tab="audio" title="Audio analysis and every band-to-parameter mapping">Audio<i class="tflag"></i></button>
+    <button type="button" role="tab" data-tab="export" title="Render settings, presets, viewport">Export<i class="tflag"></i></button>
+  </nav>
+  <div class="tabintro" data-tab="look">
+    <div class="btns">
+      <select id="lookSel" title="Replaces the Points, Lights, Colour and Motion settings and their audio mappings. Camera, transform, framing, film and length are kept.">
+        <option value="">Starting look…</option>
+      </select>
+    </div>
+  </div>
 
-  <details class="mod" data-group="camera" open>
-    <summary>Camera <em>move + duration</em><i class="gflag"></i></summary>
+  <details class="mod" data-group="camera" data-tab="scene" open>
+    <summary>Camera <em>move</em><i class="gflag"></i></summary>
     <div class="btns" style="margin-bottom:9px" id="camModeBtns">
       <button type="button" data-mode="manual" title="Mouse/touch orbit only, nothing drives the camera">Manual</button>
       <button type="button" data-mode="keyframes" class="on" title="Camera follows the keyframe path below">Keyframes</button>
@@ -588,12 +772,6 @@
     </p>
     <div class="row"><label>Ease</label><output id="o-ease">—</output>
       <input type="range" id="p-ease" min="0" max="1" step="0.01" value="0.8"></div>
-    <!-- step="any", not 0.5: Audio's "× set" writes an exact multiple of the
-         track length here, and a snapping step would land the timeline a few
-         ms off the loop point every time. max widened from 30 to 120 for the
-         same reason — looping a 30s track even twice needs more than 30. -->
-    <div class="row"><label>Duration (s)</label><output id="o-dur">—</output>
-      <input type="range" id="p-dur" min="1" max="120" step="any" value="8"></div>
 
     <div class="btns" style="margin:9px 0" id="camKeyBtns">
       <button id="camAddKey" title="Add a camera keyframe at the current playhead">Add key</button>
@@ -630,7 +808,7 @@
     </div>
   </details>
 
-  <details class="mod" data-group="model">
+  <details class="mod" data-group="model" data-tab="scene">
     <summary>Transform <em>correct</em><i class="gflag" id="modelFlag"></i></summary>
     <div class="btns" style="margin-bottom:9px">
       <button id="correctToggle" aria-pressed="false">Correct</button>
@@ -665,7 +843,7 @@
     </p>
   </details>
 
-  <details class="mod" data-group="trim">
+  <details class="mod" data-group="trim" data-tab="scene">
     <summary>Opacity <em>per-splat cull</em><i class="gflag"></i></summary>
     <div class="row"><label>Min opacity</label><output id="o-cullA">—</output>
       <input type="range" id="p-cullA" min="0" max="1" step="0.005" value="0"></div>
@@ -681,7 +859,7 @@
       Size and shape are independent failure modes — a needle can be small in volume and
       still streak hundreds of pixels — so <strong>Anisotropy limit</strong> is not a
       duplicate of <strong>Max splat size</strong>. It modifies geometry and costs real
-      detail; reach for the Optics section's <strong>Antialias floor</strong> first.
+      detail; reach for the Points section's <strong>Antialias floor</strong> first.
     </p>
     <p style="color:var(--ink-dim); margin:8px 0 0">
       <strong>Opacity × all</strong> is a peak-alpha multiply applied before Spark's own
@@ -695,7 +873,7 @@
     </p>
   </details>
 
-  <details class="mod" data-group="region">
+  <details class="mod" data-group="region" data-tab="scene">
     <summary>Masks <em>sdf, 6 slots</em><i class="gflag"></i></summary>
     <div class="btns" style="margin-bottom:9px" id="rgSlots">
       <button type="button" data-slot="0" class="on">M1</button>
@@ -735,7 +913,40 @@
     </p>
   </details>
 
-  <details class="mod" data-group="depth">
+  <details class="mod" data-group="points" data-tab="look" open>
+    <summary>Points <em>point-cloud morph</em><i class="gflag"></i></summary>
+    <p style="color:var(--ink-dim); margin:0 0 8px">Pulls every splat toward one small, uniform dot, so the capture reads as a point cloud. The splats are still Gaussians, so very small dots thin out and darken the image; raise <strong>Opacity × all</strong> (Scene tab) or route audio onto it to compensate. Scope it to one mask with the lane's <em>Mask</em> control.</p>
+    <div class="row" title="0 = the capture as trained, 1 = every splat a uniform dot. Neutral by value at 0."><label>Point cloud</label><output id="o-ptIso">—</output>
+      <input type="range" id="p-ptIso" min="0" max="1" step="0.01" value="0"></div>
+    <div class="row" title="Dot size, perceptual 0..1, log-mapped to 0.01%..5% of the capture radius. Only visible once Point cloud is above 0."><label>Point size</label><output id="o-ptSize">—</output>
+      <input type="range" id="p-ptSize" min="0" max="1" step="0.005" value="0.65"></div>
+    <div class="row" title="Scales each splat by a stable per-splat random amount, so the cloud has texture rather than identical dots."><label>Size jitter</label><output id="o-ptJit">—</output>
+      <input type="range" id="p-ptJit" min="0" max="1" step="0.01" value="0"></div>
+    <div class="row" title="Spark's antialiasing floor on projected splat size (its blurAmount, in pixels²). 0.3 is Spark's default. Lower it to keep the smallest dots alive below a pixel, at the cost of aliasing and shimmer. Raise it if a large capture shows radial needle shards. Per-capture, not a cleanup control."><label>Antialias floor</label><output id="o-blurAmount">—</output>
+      <input type="range" id="p-blurAmount" min="0" max="1.5" step="0.01" value="0.3"></div>
+  </details>
+
+  <details class="mod" data-group="lights" data-tab="look" open>
+    <summary>Lights <em>three band lights</em><i class="gflag"></i></summary>
+    <p style="color:var(--ink-dim); margin:0 0 8px">Three point lights added on top of the capture's own light. Each light can follow an audio band: pick one in its header. <strong>Place</strong> a light, then click the model; drag the numbered markers on the viewport to move one. Strongest on dark or low-key captures, weak on bright overcast scans; the method adds light but cannot remove what is baked in.</p>
+    <div id="ltRows"><!-- generated by buildLightRows() --></div>
+  </details>
+
+  <details class="mod" data-group="colour" data-tab="look">
+    <summary>Colour <em>tint + saturation</em><i class="gflag"></i></summary>
+    <div class="row"><label>Brightness</label><output id="o-bright">—</output>
+      <input type="range" id="p-bright" min="0" max="2" step="0.01" value="1"></div>
+    <div class="row"><label>R</label><output id="o-tR">—</output>
+      <input type="range" id="p-tR" min="0" max="2" step="0.01" value="1"></div>
+    <div class="row"><label>G</label><output id="o-tG">—</output>
+      <input type="range" id="p-tG" min="0" max="2" step="0.01" value="1"></div>
+    <div class="row"><label>B</label><output id="o-tB">—</output>
+      <input type="range" id="p-tB" min="0" max="2" step="0.01" value="1"></div>
+    <div class="row"><label>Saturation</label><output id="o-sat">—</output>
+      <input type="range" id="p-sat" min="0" max="2" step="0.01" value="1"></div>
+  </details>
+
+  <details class="mod" data-group="depth" data-tab="look">
     <summary>Depth <em>fade + field</em><i class="gflag"></i></summary>
     <div class="subhead">Depth of field <em>lens blur</em></div>
     <p style="color:var(--ink-dim); margin:0 0 8px">Spark's own per-splat circle-of-confusion blur — a defocused splat is exactly another (wider, dimmer) Gaussian, so this composites correctly through the existing sort with no special handling. <strong>100 is exactly off</strong>, on the fast path, not an invisible blur still paying for itself.</p>
@@ -787,11 +998,9 @@
       <input type="range" id="p-dpFar" min="0" max="8" step="0.02" value="3"></div>
   </details>
 
-  <details class="mod" data-group="optics">
+  <details class="mod" data-group="optics" data-tab="look">
     <summary>Optics <em>lens body</em><i class="gflag"></i></summary>
     <p style="color:var(--ink-dim); margin:0 0 8px">Renderer-level properties, not per-splat modifiers — these apply to every gaussian on every frame whether or not depth of field is on.</p>
-    <div class="row debug-only" title="A constant term added to every splat's projected 2D covariance. Spark's own default is 0.3, and it is antialiasing: the energy correction that follows attenuates a sub-pixel-thin needle by ~75% against ~7% for a round splat. Lower it for maximum clarity, raise it if a capture still shows shards. Demoted to ?debug=1 — 0.3 fixed the shard hunt and is a per-capture value, not a constant to hard-code again."><label>Antialias floor</label><output id="o-blurAmount">—</output>
-      <input type="range" id="p-blurAmount" min="0" max="1.5" step="0.01" value="0.3"></div>
     <div class="subhead">Focal surface <em>scheimpflug + curvature</em></div>
     <p style="color:var(--ink-dim); margin:0 0 8px">Bends and tips the surface that is in focus. All three do nothing at Depth of field 100, because there is no blur for them to shape.</p>
     <div class="row" title="Bows the focal surface toward or away from the camera at the frame edges — positive pushes the corners further away, negative pulls them nearer. Real lenses do this whether you want them to or not."><label>Field curvature</label><output id="o-fieldCurve">—</output>
@@ -806,122 +1015,9 @@
       <input type="range" id="p-swirlAmt" min="0" max="30" step="0.1" value="0"></div>
     <div class="row" title="How sharply swirl ramps from the frame centre to the corners. 0 is uniform across the frame; higher confines it to the edges."><label>Swirl falloff</label><output id="o-swirlFalloff">—</output>
       <input type="range" id="p-swirlFalloff" min="0" max="5" step="0.05" value="2"></div>
-    <p style="color:var(--ink-dim); margin:8px 0 0">
-      <strong>0.3 is the figure for scenes trained <em>with</em> antialiasing</strong> — a
-      capture trained without it may want another value. This is per-capture, not a
-      constant. It is the first thing to reach for when a large capture shows radial
-      needle shards; the Opacity section's <strong>Anisotropy limit</strong> is the second.
-    </p>
   </details>
 
-  <details class="mod" data-group="colour">
-    <summary>Colour <em>tint + saturation</em><i class="gflag"></i></summary>
-    <div class="row"><label>Brightness</label><output id="o-bright">—</output>
-      <input type="range" id="p-bright" min="0" max="2" step="0.01" value="1"></div>
-    <div class="row"><label>R</label><output id="o-tR">—</output>
-      <input type="range" id="p-tR" min="0" max="2" step="0.01" value="1"></div>
-    <div class="row"><label>G</label><output id="o-tG">—</output>
-      <input type="range" id="p-tG" min="0" max="2" step="0.01" value="1"></div>
-    <div class="row"><label>B</label><output id="o-tB">—</output>
-      <input type="range" id="p-tB" min="0" max="2" step="0.01" value="1"></div>
-    <div class="row"><label>Saturation</label><output id="o-sat">—</output>
-      <input type="range" id="p-sat" min="0" max="2" step="0.01" value="1"></div>
-  </details>
-
-  <details class="mod" data-group="displace">
-    <summary>Noise <em>displacement field</em><i class="gflag"></i></summary>
-    <div class="btns" style="margin-bottom:9px">
-      <select id="dField" title="Sin: the original field. Curl: volume-preserving swirl, does not inflate the cloud.">
-        <option value="sin" selected>Sin field</option>
-        <option value="curl">Curl (volume-preserving)</option>
-      </select>
-    </div>
-    <div class="row"><label>Amount</label><output id="o-dAmt">—</output>
-      <input type="range" id="p-dAmt" min="0" max="0.5" step="0.001" value="0"></div>
-    <div class="row"><label>Frequency</label><output id="o-dFrq">—</output>
-      <input type="range" id="p-dFrq" min="0.05" max="20" step="0.05" value="2"></div>
-    <div class="row"><label>Drift speed</label><output id="o-dSpd">—</output>
-      <input type="range" id="p-dSpd" min="0" max="3" step="0.01" value="0.3"></div>
-    <div class="row"><label>Per-splat scatter</label><output id="o-dRnd">—</output>
-      <input type="range" id="p-dRnd" min="0" max="1" step="0.01" value="1"></div>
-    <p style="color:var(--ink-dim); margin:8px 0 0">Displace by colour — offsets along one axis by the splat's own raw luminance or hue, centred so mid-tones don't move.</p>
-    <div class="btns" style="margin:9px 0">
-      <select id="dcMode" title="Off, or drive the offset below from luminance/hue">
-        <option value="off" selected>Off</option>
-        <option value="luma">By luminance</option>
-        <option value="hue">By hue</option>
-      </select>
-      <select id="dcAxis" title="Which world axis the colour offset moves along">
-        <option value="x">X axis</option>
-        <option value="y" selected>Y axis</option>
-        <option value="z">Z axis</option>
-      </select>
-    </div>
-    <div class="row"><label>Colour offset</label><output id="o-dcAmt">—</output>
-      <input type="range" id="p-dcAmt" min="-0.5" max="0.5" step="0.001" value="0"></div>
-  </details>
-
-  <details class="mod" data-group="quantise">
-    <summary>Quantise <em>voxel snap</em><i class="gflag"></i></summary>
-    <div class="row"><label>Amount</label><output id="o-qAmt">—</output>
-      <input type="range" id="p-qAmt" min="0" max="1" step="0.01" value="0"></div>
-    <div class="row"><label>Cell X</label><output id="o-qCellX">—</output>
-      <input type="range" id="p-qCellX" min="0.005" max="1" step="0.005" value="0.1"></div>
-    <div class="row"><label>Cell Y</label><output id="o-qCellY">—</output>
-      <input type="range" id="p-qCellY" min="0.005" max="1" step="0.005" value="0.1"></div>
-    <div class="row"><label>Cell Z</label><output id="o-qCellZ">—</output>
-      <input type="range" id="p-qCellZ" min="0.005" max="1" step="0.005" value="0.1"></div>
-    <p style="color:var(--ink-dim); margin:8px 0 0">Grid basis — rotates the snap grid before quantising, so it does not have to align with the world axes.</p>
-    <div class="row"><label>Grid rot X</label><output id="o-qRotX">—</output>
-      <input type="range" id="p-qRotX" min="-180" max="180" step="1" value="0"></div>
-    <div class="row"><label>Grid rot Y</label><output id="o-qRotY">—</output>
-      <input type="range" id="p-qRotY" min="-180" max="180" step="1" value="0"></div>
-    <div class="row"><label>Grid rot Z</label><output id="o-qRotZ">—</output>
-      <input type="range" id="p-qRotZ" min="-180" max="180" step="1" value="0"></div>
-    <p style="color:var(--ink-dim); margin:8px 0 0">Single-axis mode overrides the 3-axis grid above: only that axis snaps, with a per-band random offset — stratification / scanline, not cubic voxels.</p>
-    <div class="btns" style="margin:9px 0">
-      <select id="qAxis" title="Off = the rotated 3-axis grid above. X/Y/Z = single-axis stratify instead.">
-        <option value="off" selected>3-axis grid</option>
-        <option value="x">Single axis: X</option>
-        <option value="y">Single axis: Y</option>
-        <option value="z">Single axis: Z</option>
-      </select>
-    </div>
-    <div class="row"><label>Band offset</label><output id="o-qStrat">—</output>
-      <input type="range" id="p-qStrat" min="0" max="1" step="0.01" value="0"></div>
-    <div class="row"><label>Colour posterise</label><output id="o-qPoster">—</output>
-      <input type="range" id="p-qPoster" min="0" max="1" step="0.01" value="0"></div>
-  </details>
-
-  <details class="mod" data-group="wave">
-    <summary>Wave <em>index-phase sweep</em><i class="gflag"></i></summary>
-    <p style="color:var(--ink-dim); margin:0 0 8px">Modulates Noise amount, Quantise amount and each Mask's Attract amount with a per-splat, animated 0..1 envelope — so those effects sweep through the cloud instead of applying uniformly. No effect at Amount 0.</p>
-    <div class="btns" style="margin-bottom:9px">
-      <select id="wMode" title="Per-splat phase source">
-        <option value="hash" selected>Per-splat (hash)</option>
-        <option value="x">Position: X</option>
-        <option value="y">Position: Y</option>
-        <option value="z">Position: Z</option>
-      </select>
-    </div>
-    <div class="row"><label>Amount</label><output id="o-wAmt">—</output>
-      <input type="range" id="p-wAmt" min="0" max="1" step="0.01" value="0"></div>
-    <div class="row"><label>Frequency</label><output id="o-wFreq">—</output>
-      <input type="range" id="p-wFreq" min="0.1" max="20" step="0.05" value="2"></div>
-    <div class="row"><label>Speed</label><output id="o-wSpd">—</output>
-      <input type="range" id="p-wSpd" min="0" max="3" step="0.01" value="0.3"></div>
-  </details>
-
-  <details class="mod" data-group="smear">
-    <summary>Smear <em>screen-space streak</em><i class="gflag"></i></summary>
-    <p style="color:var(--ink-dim); margin:0 0 8px">Stretches each splat's own projected shape along a fixed screen-space direction — the same covariance-plus-energy-correction machinery Depth of field uses, so the two compose. Screen-space, not per-splat: a uniform streak direction, not each splat's own motion. No effect at Amount 0.</p>
-    <div class="row"><label>Amount</label><output id="o-smearAmt">—</output>
-      <input type="range" id="p-smearAmt" min="0" max="2000" step="5" value="0"></div>
-    <div class="row"><label>Angle</label><output id="o-smearAngle">—</output>
-      <input type="range" id="p-smearAngle" min="0" max="180" step="1" value="0"></div>
-  </details>
-
-  <details class="mod" data-group="film">
+  <details class="mod" data-group="film" data-tab="look">
     <summary>Film <em>emulsion profile</em><i class="gflag"></i></summary>
     <div class="subhead">Profile <em>emulsion</em></div>
     <p style="color:var(--ink-dim); margin:0 0 8px">Parametric approximations, hand-tuned rather than measured — named descriptively rather than after real stocks, so nothing here claims an accuracy it does not have. <strong>Intensity 0 is an exact bypass</strong>, the only honest way to A/B a look.</p>
@@ -961,7 +1057,7 @@
       <input type="range" id="p-gSat" min="0" max="2" step="0.01" value="1"></div>
   </details>
 
-  <details class="mod" data-group="frame">
+  <details class="mod" data-group="frame" data-tab="look">
     <summary>Frame <em>vignette + rebate</em><i class="gflag"></i></summary>
     <div class="subhead">Vignette <em>lens falloff</em></div>
     <p style="color:var(--ink-dim); margin:0 0 8px">A fullscreen pass over the finished render, not a per-splat effect — darkens toward the edges in linear light, so it behaves like lost light rather than revealing the background through a translucent cloud. No effect at Amount 0.</p>
@@ -994,7 +1090,7 @@
       <input type="range" id="p-frTilt" min="-3" max="3" step="0.05" value="0"></div>
   </details>
 
-  <details class="mod" data-group="grain">
+  <details class="mod" data-group="grain" data-tab="look">
     <summary>Grain <em>post pass</em><i class="gflag"></i></summary>
     <p style="color:var(--ink-dim); margin:0 0 8px">Simulated film grain in the finished image, sized in output pixels so a setting matches across export resolutions. Re-randomised every frame rather than translated, so it reads as grain rather than a sliding texture. No effect at Amount 0.</p>
     <div class="row"><label>Amount</label><output id="o-grainAmt">—</output>
@@ -1005,32 +1101,127 @@
       <input type="range" id="p-grainColor" min="0" max="1" step="0.01" value="0"></div>
   </details>
 
-  <details class="mod" data-group="audio">
-    <summary>Audio <em>fft drive</em><i class="gflag"></i></summary>
+  <details class="mod" data-group="displace" data-tab="motion">
+    <summary>Noise <em>displacement field</em><i class="gflag"></i></summary>
     <div class="btns" style="margin-bottom:9px">
-      <button id="audLoad">Load audio</button>
+      <select id="dField" title="Sin: the original field. Curl: volume-preserving swirl, does not inflate the cloud.">
+        <option value="sin" selected>Sin field</option>
+        <option value="curl">Curl (volume-preserving)</option>
+      </select>
+    </div>
+    <div class="row"><label>Amount</label><output id="o-dAmt">—</output>
+      <input type="range" id="p-dAmt" min="0" max="0.5" step="0.001" value="0"></div>
+    <div class="row"><label>Frequency</label><output id="o-dFrq">—</output>
+      <input type="range" id="p-dFrq" min="0.05" max="20" step="0.05" value="2"></div>
+    <div class="row"><label>Drift speed</label><output id="o-dSpd">—</output>
+      <input type="range" id="p-dSpd" min="0" max="3" step="0.01" value="0.3"></div>
+    <div class="row"><label>Per-splat scatter</label><output id="o-dRnd">—</output>
+      <input type="range" id="p-dRnd" min="0" max="1" step="0.01" value="1"></div>
+    <p style="color:var(--ink-dim); margin:8px 0 0">Displace by colour — offsets along one axis by the splat's own raw luminance or hue, centred so mid-tones don't move.</p>
+    <div class="btns" style="margin:9px 0">
+      <select id="dcMode" title="Off, or drive the offset below from luminance/hue">
+        <option value="off" selected>Off</option>
+        <option value="luma">By luminance</option>
+        <option value="hue">By hue</option>
+      </select>
+      <select id="dcAxis" title="Which world axis the colour offset moves along">
+        <option value="x">X axis</option>
+        <option value="y" selected>Y axis</option>
+        <option value="z">Z axis</option>
+      </select>
+    </div>
+    <div class="row"><label>Colour offset</label><output id="o-dcAmt">—</output>
+      <input type="range" id="p-dcAmt" min="-0.5" max="0.5" step="0.001" value="0"></div>
+  </details>
+
+  <details class="mod" data-group="quantise" data-tab="motion">
+    <summary>Quantise <em>voxel snap</em><i class="gflag"></i></summary>
+    <div class="row"><label>Amount</label><output id="o-qAmt">—</output>
+      <input type="range" id="p-qAmt" min="0" max="1" step="0.01" value="0"></div>
+    <div class="row"><label>Cell X</label><output id="o-qCellX">—</output>
+      <input type="range" id="p-qCellX" min="0.005" max="1" step="0.005" value="0.1"></div>
+    <div class="row"><label>Cell Y</label><output id="o-qCellY">—</output>
+      <input type="range" id="p-qCellY" min="0.005" max="1" step="0.005" value="0.1"></div>
+    <div class="row"><label>Cell Z</label><output id="o-qCellZ">—</output>
+      <input type="range" id="p-qCellZ" min="0.005" max="1" step="0.005" value="0.1"></div>
+    <p style="color:var(--ink-dim); margin:8px 0 0">Grid basis — rotates the snap grid before quantising, so it does not have to align with the world axes.</p>
+    <div class="row"><label>Grid rot X</label><output id="o-qRotX">—</output>
+      <input type="range" id="p-qRotX" min="-180" max="180" step="1" value="0"></div>
+    <div class="row"><label>Grid rot Y</label><output id="o-qRotY">—</output>
+      <input type="range" id="p-qRotY" min="-180" max="180" step="1" value="0"></div>
+    <div class="row"><label>Grid rot Z</label><output id="o-qRotZ">—</output>
+      <input type="range" id="p-qRotZ" min="-180" max="180" step="1" value="0"></div>
+    <p style="color:var(--ink-dim); margin:8px 0 0">Single-axis mode overrides the 3-axis grid above: only that axis snaps, with a per-band random offset — stratification / scanline, not cubic voxels.</p>
+    <div class="btns" style="margin:9px 0">
+      <select id="qAxis" title="Off = the rotated 3-axis grid above. X/Y/Z = single-axis stratify instead.">
+        <option value="off" selected>3-axis grid</option>
+        <option value="x">Single axis: X</option>
+        <option value="y">Single axis: Y</option>
+        <option value="z">Single axis: Z</option>
+      </select>
+    </div>
+    <div class="row"><label>Band offset</label><output id="o-qStrat">—</output>
+      <input type="range" id="p-qStrat" min="0" max="1" step="0.01" value="0"></div>
+    <div class="row"><label>Colour posterise</label><output id="o-qPoster">—</output>
+      <input type="range" id="p-qPoster" min="0" max="1" step="0.01" value="0"></div>
+  </details>
+
+  <details class="mod" data-group="wave" data-tab="motion">
+    <summary>Wave <em>index-phase sweep</em><i class="gflag"></i></summary>
+    <p style="color:var(--ink-dim); margin:0 0 8px">Modulates Noise amount, Quantise amount and each Mask's Attract amount with a per-splat, animated 0..1 envelope — so those effects sweep through the cloud instead of applying uniformly. No effect at Amount 0.</p>
+    <div class="btns" style="margin-bottom:9px">
+      <select id="wMode" title="Per-splat phase source">
+        <option value="hash" selected>Per-splat (hash)</option>
+        <option value="x">Position: X</option>
+        <option value="y">Position: Y</option>
+        <option value="z">Position: Z</option>
+      </select>
+    </div>
+    <div class="row"><label>Amount</label><output id="o-wAmt">—</output>
+      <input type="range" id="p-wAmt" min="0" max="1" step="0.01" value="0"></div>
+    <div class="row"><label>Frequency</label><output id="o-wFreq">—</output>
+      <input type="range" id="p-wFreq" min="0.1" max="20" step="0.05" value="2"></div>
+    <div class="row"><label>Speed</label><output id="o-wSpd">—</output>
+      <input type="range" id="p-wSpd" min="0" max="3" step="0.01" value="0.3"></div>
+  </details>
+
+  <details class="mod" data-group="smear" data-tab="motion">
+    <summary>Smear <em>screen-space streak</em><i class="gflag"></i></summary>
+    <p style="color:var(--ink-dim); margin:0 0 8px">Stretches each splat's own projected shape along a fixed screen-space direction — the same covariance-plus-energy-correction machinery Depth of field uses, so the two compose. Screen-space, not per-splat: a uniform streak direction, not each splat's own motion. No effect at Amount 0.</p>
+    <div class="row"><label>Amount</label><output id="o-smearAmt">—</output>
+      <input type="range" id="p-smearAmt" min="0" max="2000" step="5" value="0"></div>
+    <div class="row"><label>Angle</label><output id="o-smearAngle">—</output>
+      <input type="range" id="p-smearAngle" min="0" max="180" step="1" value="0"></div>
+  </details>
+
+  <details class="mod" data-group="audio" data-tab="audio" open>
+    <summary>Audio <em>bands + mappings</em><i class="gflag"></i></summary>
+    <div class="btns" style="margin-bottom:9px">
+      <button id="audLoad2">Load audio</button>
       <button id="audMute" disabled>Mute</button>
       <button id="audClear" disabled>Clear</button>
     </div>
     <div id="audName" style="color:var(--ink-dim); margin-bottom:8px">no audio loaded</div>
-    <div class="btns" style="margin-bottom:9px">
-      <button id="audLoopBtn" disabled title="Repeat the track for as long as the timeline runs. Off, a track shorter than Duration plays once and the remainder is silent.">Loop</button>
-      <label class="audlbl" style="margin-left:4px">Duration</label>
-      <input type="number" id="audLoops" min="1" max="64" step="1" value="1"
-             style="width:44px" title="Number of track lengths to fit into Duration">
-      <button id="audFitDur" disabled title="Set Duration to exactly this many track lengths">× set</button>
-    </div>
     <div class="meter"><label>Low</label><div class="bar"><i id="m-low"></i></div><output id="o-mlow">0.00</output></div>
     <div class="meter"><label>Mid</label><div class="bar"><i id="m-mid"></i></div><output id="o-mmid">0.00</output></div>
     <div class="meter"><label>High</label><div class="bar"><i id="m-high"></i></div><output id="o-mhigh">0.00</output></div>
+    <div class="meter" title="Onsets — a short pulse on every detected hit (drum, pluck, transient), whatever its frequency. For flashes and kicks."><label>Hit</label><div class="bar"><i id="m-hit"></i></div><output id="o-mhit">0.00</output></div>
+    <div class="subhead">Mappings <em>band → parameter</em></div>
+    <div id="routeList"></div>
     <p style="color:var(--ink-dim); margin:8px 0 0">
-      Analysed offline into per-band envelopes, not sampled live — so scrubbing, playback
-      and export all read the same values. Click a parameter's <em>name</em> to focus it,
-      then pick a band in the lane below. Audio adds on top of any envelope.
+      To map: arm a band under <strong>Map</strong> in the transport bar, then click any slider
+      in the panel. Click it again to unmap; Esc when you are done. Depth is how far the band
+      pushes the control, as a fraction of its whole range; negative pushes it down. Audio adds
+      on top of the slider and any keyframes. Low / Mid / High follow loudness in their band,
+      Hit pulses on each detected onset.
+    </p>
+    <p style="color:var(--ink-dim); margin:8px 0 0">
+      Analysed once, offline, not sampled live, so scrubbing, playback and export all read the
+      same values.
     </p>
   </details>
 
-  <details class="mod" data-group="output" open>
+  <details class="mod" data-group="output" data-tab="export" open>
     <summary>Output <em>webcodecs</em><i class="gflag"></i></summary>
     <div class="btns" style="margin-bottom:9px">
       <select id="res">
@@ -1057,7 +1248,7 @@
     </p>
   </details>
 
-  <details class="mod" data-group="preset">
+  <details class="mod" data-group="preset" data-tab="export">
     <summary>Preset <em>json</em><i class="gflag"></i></summary>
     <div class="btns">
       <button id="savePreset">Save JSON</button>
@@ -1069,7 +1260,7 @@
     </p>
   </details>
 
-  <details class="mod" data-group="viewport">
+  <details class="mod" data-group="viewport" data-tab="export">
     <summary>Viewport<i class="gflag"></i></summary>
     <div class="btns" style="margin-bottom:9px">
       <select id="bgColor" title="Applies to the live view and export — not the effect stack, which is always measured against Void">
@@ -1086,6 +1277,7 @@
     <label class="check"><input type="checkbox" id="mobileMode"> Mobile profile (caps pixel ratio, forces LOD)</label>
     <div class="btns"><button id="reframe">Reframe</button><button id="reload">Load another</button></div>
   </details>
+
 </aside>
 
 <input type="file" id="file" accept=".ply,.spz,.splat,.ksplat,.sog,.zip,.rad" hidden>
@@ -1113,7 +1305,7 @@
       <tr><td>H</td><td>hide / show the rail — preview the frame clean</td></tr>
       <tr><td>Hold A</td><td>Adjust — release to return to the previous mode</td></tr>
       <tr><td>Hold F</td><td>Focus pick — release to return to the previous mode</td></tr>
-      <tr><td>Esc</td><td>exit any transient mode, clear a focus lock</td></tr>
+      <tr><td>Esc</td><td>end Map mode, close Length, exit any transient mode, clear a focus lock</td></tr>
       <tr><td>?</td><td>this overlay</td></tr>
     </table>
     <p>Desktop only. Correct has no hold binding — it needs both hands and time.</p>
@@ -1165,6 +1357,24 @@ let dpr = 1;
 let playing = false;
 let rendering = false;
 const bounds = { min: -1, max: 1 };   // object-space Y extent
+let objCentre = null;                 // object-space bbox centre (THREE.Vector3, set once THREE is imported)
+let splatLoading = false;             // true for the duration of loadSplat()
+let nrmLoadedAt = 0;                  // when the current capture finished loading (normals wait for it to settle)
+/* Timeline length — how Duration is derived. "seconds" leaves p-dur alone;
+   "track" holds it at N x the track; "bars" at bars x beats x 60/bpm.
+   Workspace-and-look state: saved in presets (v7 `timeline`). Declared up
+   here because the p-dur listener reads it. */
+const TL = { mode: "seconds", trackN: 1, bpm: 120, bars: 4, beats: 4 };
+let mapBand = null;                   // armed Map band, or null
+var routeSig = null;                  // Mappings list structure signature (var: read during boot, before its block)
+/* Smoothing presets for audio mappings — the four shapes most mappings
+   want, named for what they do. "custom" is anything else. */
+const SHAPE_PRESETS = {
+  punchy: { attack: 5, release: 200, lag: 0, gain: 1, floor: 0, curve: 1 },
+  smooth: { attack: 30, release: 450, lag: 0, gain: 1, floor: 0, curve: 1 },
+  swell:  { attack: 400, release: 1500, lag: 0, gain: 1, floor: 0, curve: 1 },
+  gate:   { attack: 0, release: 90, lag: 0, gain: 1.6, floor: 0.3, curve: 1.6 },
+};
 const P = {};                         // parameter values, keyed by slider id
 
 /* Gesture mode (DEV_PLAN_GESTURE.md) — GEST[ax] is null or {id,lo,hi,invert}.
@@ -1274,6 +1484,7 @@ $("bgColor").onchange = applyBgColor;
 for (const id of ["dField", "dcMode", "dcAxis", "qAxis", "wMode", "dpMode", "frAspect"]) $(id).onchange = () => pushUniforms();
 $("dofFocusSrc").onchange = () => updateDofFocus();
 
+objCentre = new THREE.Vector3();
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 1000);
 camera.position.set(0, 0, 3);
@@ -1324,11 +1535,115 @@ camera.position.set(0, 0, 3);
    several builders would mean several chances to get the anchor discipline
    wrong, and the two covariance patches (smear, swirl) MUST share the single
    det/blurAdjust energy correction that already exists below them. */
+/* ------------------------------------------------------------------ *
+ * Lights — ported from FX Bench (DEV_PLAN_FXBENCH_LIGHT.md, phases Q–T).
+ *
+ * ADDITIVE lighting, not relighting: the light baked into a capture is not
+ * removed (that needs albedo/normal decomposition at training time). The
+ * capture is pulled toward a floor (Darken) and light is added from three
+ * point lights. On a bright overcast scan the effect is weak; on a dark or
+ * low-key scan it is strong. That is the method, not a tuning problem.
+ *
+ * Lives in the splat VERTEX shader (a raster patch), not the dyno graph:
+ * lights move every frame, and in the graph every uniform change re-bakes
+ * the packed buffer. Consequences, accepted: lights see post-modifier
+ * positions and colour (displaced splats are lit where they ARE), and
+ * region masks cannot gate lights.
+ *
+ * The GLSL below is FX Bench's, kept verbatim apart from LT_N (4 -> 3), so
+ * its measured gates still describe it: ltAmt 0 is an exact bypass
+ * (mix(x, y, 0) == x, with the sRGB round-trip living only inside y), an
+ * unused slot contributes an exact 0 by value, and Shading 0 is the
+ * distance-only model by construction.
+ * ------------------------------------------------------------------ */
+const LT_N = 3;
+const SRGB_GLSL = `
+vec3 srgbDecode(vec3 c){
+  vec3 lo = c / 12.92;
+  vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
+  return mix(lo, hi, step(vec3(0.04045), c));
+}
+vec3 srgbEncode(vec3 c){
+  c = clamp(c, 0.0, 1.0);
+  vec3 lo = c * 12.92;
+  vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+  return mix(lo, hi, step(vec3(0.0031308), c));
+}`;
+const LIGHT_UNIFORMS_GLSL = `
+uniform float uLtAmt;
+uniform float uLtBase;
+uniform float uLtAdd;
+uniform float uLtEmit;
+uniform float uLtFall;
+uniform vec3 uLtPos[${LT_N}];
+uniform vec3 uLtCol[${LT_N}];
+uniform float uLtI[${LT_N}];
+uniform float uLtR[${LT_N}];
+uniform float uLtNrm;
+uniform float uLtWrap;
+uniform float uLtRim;
+uniform float uLtRimPow;
+uniform float uNrmPlLo;
+uniform float uNrmPlHi;
+uniform highp sampler2D uNrmTex;
+uniform int uNrmW;
+uniform int uNrmBase;
+uniform int uNrmN;
+uniform mat3 uNrmMat;
+${SRGB_GLSL}`;
+/* Distance-only sum (FX Bench Q/R). Light falls off with distance alone, so
+   it reads as a lantern in haze, not as lit surfaces. */
+const LIGHT_SUM_GLSL = `
+        vec3 _lin = srgbDecode(vRgba.rgb);
+        vec3 _E = vec3(0.0);
+        for (int i = 0; i < ${LT_N}; i++) {
+            float _d = length(viewCenter - uLtPos[i]);
+            float _att = pow(1.0 - smoothstep(0.0, uLtR[i], _d), uLtFall);
+            _E += uLtI[i] * _att * uLtCol[i];
+        }`;
+/* Shaded lights (FX Bench T) on neighbourhood normals. Runs only when
+   Shading > 0 (uniform branch: no texel fetch otherwise). Low-planarity
+   splats (foliage, edges, floaters) fall back to distance-only, so nothing
+   is given a confident wrong normal. PCA normals have no sign: they are
+   faced toward the viewer, so back-lighting through thin material is lost. */
+const LIGHT_T_GLSL = `
+        if (uLtNrm > 0.0) {
+            vec3 _N = vec3(0.0); float _cf = 0.0;
+            int _ni = int(splatIndex) - uNrmBase;
+            if (_ni >= 0 && _ni < uNrmN) {
+                vec4 _t = texelFetch(uNrmTex, ivec2(_ni % uNrmW, _ni / uNrmW), 0);
+                _N = normalize(uNrmMat * (_t.xyz * 2.0 - 1.0));
+                _N = dot(_N, viewCenter) > 0.0 ? -_N : _N;
+                _cf = smoothstep(uNrmPlLo, uNrmPlHi, _t.w);
+            }
+            vec3 _V = normalize(-viewCenter);
+            float _rim = pow(max(1.0 - abs(dot(_N, _V)), 0.0), uLtRimPow) * uLtRim * _cf;
+            vec3 _En = vec3(0.0);
+            for (int i = 0; i < ${LT_N}; i++) {
+                vec3 _Lv = uLtPos[i] - viewCenter;
+                float _d = length(_Lv);
+                float _att = pow(1.0 - smoothstep(0.0, uLtR[i], _d), uLtFall);
+                float _df = max((dot(_N, _Lv / max(_d, 1e-6)) + uLtWrap) / (1.0 + uLtWrap), 0.0);
+                _En += uLtI[i] * _att * uLtCol[i] * (mix(1.0, _df, _cf) + _rim);
+            }
+            _E = mix(_E, _En, uLtNrm);
+        }`;
+const LIGHT_OUT_GLSL = `
+        vec3 _lit = _lin * uLtBase + mix(_lin * _E, _E * uLtEmit, uLtAdd);
+        vRgba.rgb = mix(vRgba.rgb, srgbEncode(_lit), uLtAmt);
+    }`;
+const LIGHT_APPLY_GLSL = `
+    {` + LIGHT_SUM_GLSL + LIGHT_T_GLSL + LIGHT_OUT_GLSL;
+
 const SHADER_ANCHORS = {
   uniform:   "uniform float apertureAngle;",
   focusBlur: "float focusBlur = abs((-viewCenter.z - focalDistance) / viewCenter.z);",
   detOrig:   "float detOrig = a * d - b * b;",
   alpha:     "rgba.a *= blurAdjust;",
+  /* Lights: the point where the per-splat colour is final (SH already folded
+     into rgba, viewCenter post-modifier and in scope), ahead of the 2DGS
+     early return so both paths see it. Found by FX Bench's Q0 spike. */
+  lightApply: "    vRgba = rgba;\n    vSplatUv = position.xy * adjustedStdDev;",
 };
 
 function buildSplatVertexShader(base) {
@@ -1341,7 +1656,11 @@ function buildSplatVertexShader(base) {
       );
     }
   }
-  return base
+  if (base.split(SHADER_ANCHORS.lightApply).length !== 2) {
+    throw new Error("Splat vertex shader: the lights anchor is not present exactly once — Spark version drift.");
+  }
+  const out = base
+    .replace(SHADER_ANCHORS.lightApply, SHADER_ANCHORS.lightApply + LIGHT_APPLY_GLSL)
     .replace(SHADER_ANCHORS.uniform, `${SHADER_ANCHORS.uniform}
 uniform float smearAmt;
 uniform float smearAngle;
@@ -1351,7 +1670,7 @@ uniform float fieldCurve;
 uniform float planeTilt;
 uniform float planeSwing;
 uniform float nearBoost;
-uniform float splatOpacity;`)
+uniform float splatOpacity;${LIGHT_UNIFORMS_GLSL}`)
 
     /* --- focal SURFACE, replacing the focal PLANE ------------------------
        Scheimpflug plus field curvature. The focal surface is no longer normal
@@ -1452,6 +1771,10 @@ uniform float splatOpacity;`)
        over to saturate, which wants far more overlap than this capture has —
        plausible on a 2M-splat scan, untested. See NOTES. */
     .replace(SHADER_ANCHORS.alpha, "rgba.a *= blurAdjust * splatOpacity;");
+  if (!out.includes("vRgba.rgb = mix(vRgba.rgb, srgbEncode(_lit), uLtAmt);")) {
+    throw new Error("Splat vertex shader: the lights patch did not land.");
+  }
+  return out;
 }
 const _shaderProbe = new SparkRenderer({ renderer });
 const SPLAT_VERTEX_SHADER = buildSplatVertexShader(_shaderProbe.material.vertexShader);
@@ -1469,6 +1792,17 @@ const spark = new SparkRenderer({
     planeSwing: { value: 0 },
     nearBoost: { value: 1 },
     splatOpacity: { value: 1 },
+    uLtAmt: { value: 0 }, uLtBase: { value: 1 }, uLtAdd: { value: 0 },
+    uLtEmit: { value: 1 }, uLtFall: { value: 1 },
+    uLtPos: { value: Array.from({ length: LT_N }, () => new THREE.Vector3()) },
+    uLtCol: { value: Array.from({ length: LT_N }, () => new THREE.Vector3(1, 1, 1)) },
+    uLtI: { value: new Array(LT_N).fill(0) },
+    uLtR: { value: new Array(LT_N).fill(1) },
+    uLtNrm: { value: 0 }, uLtWrap: { value: 0.5 }, uLtRim: { value: 0 }, uLtRimPow: { value: 3 },
+    uNrmPlLo: { value: 0.35 }, uNrmPlHi: { value: 0.65 },
+    uNrmTex: { value: (() => { const t = new THREE.DataTexture(new Uint8Array([128, 128, 255, 0]), 1, 1); t.needsUpdate = true; return t; })() },
+    uNrmW: { value: 1 }, uNrmBase: { value: 0 }, uNrmN: { value: 0 },
+    uNrmMat: { value: new THREE.Matrix3() },
   },
 });
 scene.add(spark);
@@ -2121,6 +2455,13 @@ const U = {
   cullS:   F(9),
   sizeMul: F(1),
   anisoLimit: F(60),
+  /* Point-cloud morph (ported from Fractured / FX Bench Phase N). ptIso 0..1
+     blends every splat's scales toward ONE uniform dot size, ptDot (absolute,
+     object space, already x radius). ptJit scales each splat by a stable
+     per-index hash between (1-j) and (1+j). All three neutral by value. */
+  ptIso:   F(0),
+  ptDot:   F(0.01),
+  ptJit:   F(0),
   dAmt:    F(0),
   dFrq:    F(2),
   dSpd:    F(0.3),
@@ -2186,12 +2527,12 @@ const U = {
      1..MAX_REGIONS = region slot. invert flips how that ONE consumer reads
      the mask, independent of the region's own `invert` (which affects the
      region's own cut/crop/colorize job instead). */
-  maskSrcI: { dAmt: F(0), sat: F(0), tint: F(0), cullA: F(0), cullS: F(0), scale: F(0) },
-  maskInv:  { dAmt: F(0), sat: F(0), tint: F(0), cullA: F(0), cullS: F(0), scale: F(0) },
+  maskSrcI: { dAmt: F(0), sat: F(0), tint: F(0), cullA: F(0), cullS: F(0), scale: F(0), ptIso: F(0) },
+  maskInv:  { dAmt: F(0), sat: F(0), tint: F(0), cullA: F(0), cullS: F(0), scale: F(0), ptIso: F(0) },
 };
 const RG_SHAPES = ["sphere", "box", "ellipsoid", "cylinder", "capsule", "plane", "all"];
 const RG_MODES  = ["off", "cut", "crop", "color"];
-const MASKABLE  = ["dAmt", "sat", "tint", "cullA", "cullS", "scale"];
+const MASKABLE  = ["dAmt", "sat", "tint", "cullA", "cullS", "scale", "ptIso"];
 const DFIELD_MODES  = ["sin", "curl"];
 const DCOLOR_MODES  = ["off", "luma", "hue"];
 const AXIS3         = ["x", "y", "z"];        // shared by dcAxis, qAxis (offset by 1 for "off"), wMode (offset by 1 for "hash")
@@ -2530,9 +2871,31 @@ function buildModifier() {
     qTarget = dyno.select(dyno.equal(U.qAxisI, c(3)), stratifyAxis("z", U.qCellZ), qTarget);
     center = dyno.mix(center, qTarget, qAmtEff);
 
+    /* --- point-cloud morph (Fractured M7 / FX Bench Phase N) ------------
+       After the anisotropy clamp so the two compose: the clamp ceilings a
+       needle, this blends what is left toward a uniform dot. The target is
+       a UNIFORM size, never the splat's own mean — a needle at (10, 0.1,
+       0.05) has mean 3.4, so a mean target turns needles into big spheres
+       instead of points, and a uniform size is what reads as a point cloud.
+       Neutral by value at ptIso 0 (mix(a, b, 0) === a). Maskable, so a
+       region slot can turn just one part of the capture into points.
+       Coverage drops as the dots shrink; the answer is Opacity x all or a
+       route onto it, deliberately not a hardwired compensation. */
+    const ptIsoEff = dyno.mul(U.ptIso, pickMask("ptIso"));
+    scales = dyno.mix(scales, dyno.mul(ONE3, U.ptDot), ptIsoEff);
+
     // Size x all (trim, masked toward neutral=1), then region shrink.
     const scaleEff = dyno.mix(c(1), U.sizeMul, pickMask("scale"));
     scales = dyno.mul(dyno.mul(scales, scaleEff), shrinkFactor);
+
+    /* Size jitter — a stable per-index hash, so it is texture, not noise.
+       The z lane of hashVec3 rather than hashFloat(index), which the wave
+       already uses for its phase; the two should not move in lockstep. */
+    {
+      const hj = dyno.swizzle(dyno.hashVec3(g.index), "z");
+      const j = dyno.add(c(1), dyno.mul(dyno.sub(hj, c(0.5)), dyno.mul(c(2), U.ptJit)));
+      scales = dyno.mul(scales, dyno.max(j, c(0.02)));
+    }
 
     /* --- colour + alpha ------------------------------------------------ */
     /* Chain order: raw -> brightness -> tint -> saturation -> alpha ops (see
@@ -2625,6 +2988,74 @@ function buildModifier() {
  * Parameters — two passes, so no handler ever runs against a
  * half-populated P.
  * ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ *
+ * Lights — rows and SPEC. Generated like the region rows: 3 lights x 7
+ * fields is exactly the repetition SPEC exists to absorb. The main column
+ * is deliberately short (Amount, Darken, Glow, Shading, Rim, rig rotate,
+ * orbit, spread) — FX Bench exposed ~60 controls for the same model, which
+ * is what made it laborious. Everything else sits behind a disclosure.
+ * ------------------------------------------------------------------ */
+// [id, label, min, max, step, default, digits, tooltip]
+const LT_MAIN = [
+  ["ltAmt", "Amount", 0, 1, 0.01, 0, 2, "Master. 0 is exactly off — the shader's own bypass, not a dim light still being paid for."],
+  ["ltDark", "Darken capture", 0, 1, 0.01, 0.3, 2, "Pulls the capture's own baked light down toward black, so the added lights have something to light. 0 leaves the capture as trained."],
+  ["ltAdd", "Glow", 0, 1, 0.01, 0.6, 2, "0 = the lights LIGHT the splats (dark material stays dark). 1 = the lights GLOW regardless of what they fall on — the lantern-in-fog look. Most captures want something between."],
+  ["ltNrm", "Shading", 0, 1, 0.01, 0, 2, "0 = light falls off with distance only. Above 0, surfaces facing away from a light go dark. Needs surface directions, estimated in the background the first time you raise it (a few seconds on large captures). Works on flat surfaces; foliage and edges stay distance-only."],
+  ["ltRim", "Rim", 0, 4, 0.01, 0, 2, "Edge light on surfaces seen side-on, in each light's own colour. Needs Shading above 0 to have any surfaces to work with."],
+  ["ltYaw", "Rig rotate", -180, 180, 1, 0, 0, "Turns all three lights together around the capture's vertical axis."],
+  ["ltOrb", "Orbit", -4, 4, 0.25, 0, 2, "Turns the whole rig this many times per timeline loop. Whole numbers land back where they started at the loop point, so the loop stays seamless."],
+  ["ltSpread", "Spread", 0.1, 4, 0.01, 1, 2, "Scales every light's distance from the capture's centre."],
+];
+const LT_ADV = [
+  ["ltPitch", "Rig tilt", -90, 90, 1, 0, 0, "Tips the rig forward or back, after Rig rotate."],
+  ["ltEmit", "Glow gain", 0, 4, 0.01, 1, 2, "Brightness of the Glow term only."],
+  ["ltFall", "Falloff", 0.25, 4, 0.01, 1, 2, "Shape of each light's fade toward its Reach. Higher concentrates light near the light."],
+  ["ltWrap", "Wrap", 0, 1, 0.01, 0.5, 2, "How far light wraps past the terminator when Shading is on. 0 is a hard edge, 1 is very soft."],
+  ["ltRimPow", "Rim tightness", 0.5, 8, 0.05, 3, 2, "Higher confines the rim to the very edge."],
+];
+const LT_DEF = [
+  { X: -0.45, Y: -0.2, Z: 0.45, Hue: 0.03, Sat: 0.75 },
+  { X: 0, Y: 0.35, Z: 0.45, Hue: 0.12, Sat: 0.45 },
+  { X: 0.45, Y: -0.1, Z: 0.45, Hue: 0.6, Sat: 0.6 },
+];
+const LT_PER = (n) => {
+  const d = LT_DEF[n - 1];
+  return [
+    [`ltI${n}`, "Intensity", 0, 4, 0.01, 1, 2, "Brightness. When the light follows a band, the audio adds on top of this — set it low for a light that is dark in silence."],
+    [`ltR${n}`, "Reach", 0.05, 3, 0.01, 0.8, 2, "How far the light reaches, in multiples of the capture's radius."],
+    [`ltHue${n}`, "Colour", 0, 1, 0.005, d.Hue, 3, "Hue of the light."],
+    [`ltSat${n}`, "Saturation", 0, 1, 0.01, d.Sat, 2, "0 is white light, 1 the pure hue."],
+    [`ltX${n}`, "X", -2, 2, 0.005, d.X, 2, "Position across, in the rig, x capture radius."],
+    [`ltY${n}`, "Y", -2, 2, 0.005, d.Y, 2, "Position up, in the rig, x capture radius."],
+    [`ltZ${n}`, "Z", -2, 2, 0.005, d.Z, 2, "Position toward the front of the capture, x capture radius."],
+  ];
+};
+const LT_ALL = [...LT_MAIN, ...LT_ADV, ...[1, 2, 3].flatMap(LT_PER)];
+const LIGHT_SPEC = LT_ALL.map(([id, , , , , , digits]) => [id, digits, "lights"]);
+const LT_BANDS = ["", "low", "mid", "high", "hit"];
+
+function lightRow([id, label, lo, hi, step, def, , tip]) {
+  const cls = id.startsWith("ltHue") ? ' class="hue"' : "";
+  return `<div class="row" title="${tip}"><label>${label}</label><output id="o-${id}">—</output>` +
+    `<input type="range"${cls} id="p-${id}" min="${lo}" max="${hi}" step="${step}" value="${def}"></div>`;
+}
+function buildLightRows() {
+  let h = LT_MAIN.map(lightRow).join("");
+  h += `<details class="ltsub"><summary>More</summary>${LT_ADV.map(lightRow).join("")}</details>`;
+  for (let n = 1; n <= LT_N; n++) {
+    const rows = LT_PER(n);
+    h += `<div class="ltcard" data-n="${n}"><div class="lthead">` +
+      `<span class="ltsw" id="ltSw${n}"></span><span class="ltname">Light ${n}</span>` +
+      `<select class="ltband" id="ltBand${n}" title="Audio band this light's intensity follows">` +
+      LT_BANDS.map((b) => `<option value="${b}">${b ? b : "no audio"}</option>`).join("") + `</select>` +
+      `<button type="button" id="ltPlace${n}" title="Then click the model: the light is placed just in front of the surface you click.">Place</button></div>` +
+      rows.slice(0, 4).map(lightRow).join("") +
+      `<details class="ltsub"><summary>Position</summary>${rows.slice(4).map(lightRow).join("")}</details></div>`;
+  }
+  $("ltRows").innerHTML = h;
+}
+buildLightRows();
+
 /* [id, decimal places, group]. The group ties a parameter to its accordion
    section, so reset/envelope/audio/preset wiring all stay driven by SPEC as it
    grows. Region slot params are generated below rather than hand-listed —
@@ -2671,12 +3102,14 @@ const SPEC = [
   /* Optics — SparkRenderer properties, not dyno uniforms. They ride the same
      SPEC machinery (reset, envelopes, audio routing, presets) and are written
      out by updateOptics() on the same per-frame path as dofFocus/smear. */
-  ["blurAmount", 2, "optics"],
+  ["blurAmount", 2, "points"],
+  ["ptIso", 2, "points"], ["ptSize", 3, "points"], ["ptJit", 2, "points"],
   ["swirlAmt", 1, "optics"], ["swirlFalloff", 2, "optics"],
   ["fieldCurve", 2, "optics"], ["planeTilt", 1, "optics"], ["planeSwing", 1, "optics"],
   ["bright", 2, "colour"],
   ["tR", 2, "colour"], ["tG", 2, "colour"], ["tB", 2, "colour"],
   ["sat", 2, "colour"],
+  ...LIGHT_SPEC,
   ["br", 0, "output"], ["settle", 0, "output"], ["dpr", 2, "viewport"],
 ];
 
@@ -2716,6 +3149,7 @@ function buildRegionRows() {
 }
 buildRegionRows();
 
+
 /* cullS is the one parameter whose slider is NOT the value itself.
    Measured on the butterfly, the whole useful band of the old linear
    0.001..9 slider was 0.001..0.01 — the first 0.1% of travel, with the
@@ -2725,6 +3159,11 @@ buildRegionRows();
    exponentially onto the threshold. The `* radius` normalisation stays —
    it was never the problem, the range was. */
 const CULL_MIN = 0.0002, CULL_MAX = 0.1;
+/* Point size — FX Bench's measured log map (Phase O sweep): the slider is a
+   perceptual 0..1, mapped to 1e-4..0.05 of the capture radius, neutral at
+   0.65. A linear range spent most of its travel doing nothing. */
+const PT_SIZE_NEUTRAL = 0.65;
+const ptDotSize = (u) => 1e-4 * Math.pow(0.05 / 1e-4, u);
 const cullSize = (u) => CULL_MIN * Math.pow(CULL_MAX / CULL_MIN, u);
 
 /* Depth of field, 0 = maximum blur, 100 = none. Deliberately NOT an f-number.
@@ -2851,6 +3290,9 @@ function envValue(id, t) {
  * hand-rolled FFT — same result, built-in DSP, no numerical code to own.
  * ------------------------------------------------------------------ */
 const BANDS = { low: [20, 200], mid: [200, 2000], high: [2000, 16000] };
+/* Every audio source a route can name: the three filtered bands plus `hit`,
+   an onset pulse derived from them (see onsetEnvelope). */
+const SOURCES = [...Object.keys(BANDS), "hit"];
 const ENV_RATE = 200;                 // envelope samples per second
 
 /* Loop: when the timeline outruns the track, repeat it instead of going
@@ -2905,7 +3347,7 @@ let audioDur = 0;
 let audioEnv = null;                  // { low: Float32Array, mid, high }
 let audioEl = null;                   // <audio> for optional preview
 let audioBuffer = null;               // decoded PCM (AudioBuffer) — kept ONLY for export muxing, nothing playback-related reads it
-const audioLevel = { low: 0, mid: 0, high: 0 };
+const audioLevel = { low: 0, mid: 0, high: 0, hit: 0 };
 
 /* Downsample a rendered band to an RMS envelope at ENV_RATE. */
 function rmsEnvelope(samples, sampleRate) {
@@ -2921,6 +3363,68 @@ function rmsEnvelope(samples, sampleRate) {
   let peak = 0;
   for (const v of out) if (v > peak) peak = v;
   if (peak > 0) for (let i = 0; i < out.length; i++) out[i] /= peak;
+  return out;
+}
+
+/* Onsets ("hit"). Positive change in each normalised band envelope,
+   summed — a crude spectral flux over three bands, which is enough to find
+   drum hits, plucks and other transients in most material. Peaks are picked
+   against an adaptive threshold (local mean + a margin over ~0.3 s) with a
+   minimum gap of 90 ms, and each onset becomes a short pulse (40 ms decay)
+   scaled by its strength. The route's own release then decides how long a
+   flash lasts. Offline, like everything else here, so it is deterministic.
+   Field recordings with no clear transients will give few or no hits —
+   that is a property of the material, not a fault. */
+function onsetEnvelope(env) {
+  const bands = Object.keys(BANDS).map((b) => env[b]);
+  const n = bands[0].length;
+  const flux = new Float32Array(n);
+  for (let i = 1; i < n; i++) {
+    let f = 0;
+    for (const e of bands) { const d = e[i] - e[i - 1]; if (d > 0) f += d; }
+    flux[i] = f;
+  }
+  const win = Math.round(0.3 * ENV_RATE), gap = Math.round(0.09 * ENV_RATE), nb = 4;
+  const out = new Float32Array(n);
+  let peak = 0;
+  const hits = [];
+  const cs = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) cs[i + 1] = cs[i] + flux[i];
+  let last = -gap;
+  for (let i = 0; i < n; i++) {
+    const lo = Math.max(0, i - win), hi = Math.min(n, i + win);
+    const mean = (cs[hi] - cs[lo]) / Math.max(hi - lo, 1);
+    const v = flux[i];
+    if (v <= mean * 1.6 + 0.01 || i - last < gap) continue;
+    let isMax = true;
+    for (let j = Math.max(0, i - nb); j <= Math.min(n - 1, i + nb); j++) if (flux[j] > v) { isMax = false; break; }
+    if (!isMax) continue;
+    hits.push([i, v - mean]); last = i;
+    if (v - mean > peak) peak = v - mean;
+  }
+  const decay = Math.exp(-1 / (0.04 * ENV_RATE));
+  for (const [i, h] of hits) {
+    let a = peak > 0 ? Math.min(1, (h / peak) * 1.4) : 0;
+    for (let j = i; j < n && a > 1e-3; j++, a *= decay) out[j] = Math.max(out[j], a);
+  }
+  out.hits = hits.length;
+  return out;
+}
+
+/* Waveform overview for the scrub bar: max |sample| per bucket, mono. */
+let wavePeaks = null;
+function buildPeaks(buf) {
+  const N = 3000, L = buf.length, chs = [];
+  for (let c = 0; c < buf.numberOfChannels; c++) chs.push(buf.getChannelData(c));
+  const out = new Float32Array(N);
+  let top = 0;
+  for (let b = 0; b < N; b++) {
+    const i0 = Math.floor((b / N) * L), i1 = Math.max(i0 + 1, Math.floor(((b + 1) / N) * L));
+    let m = 0;
+    for (const ch of chs) for (let i = i0; i < i1; i += 4) { const v = Math.abs(ch[i]); if (v > m) m = v; }
+    out[b] = m; if (m > top) top = m;
+  }
+  if (top > 0) for (let b = 0; b < N; b++) out[b] /= top;
   return out;
 }
 
@@ -2946,8 +3450,10 @@ async function analyseAudio(arrayBuffer, name) {
     const rendered = await off.startRendering();
     env[band] = rmsEnvelope(rendered.getChannelData(0), buf.sampleRate);
   }
+  env.hit = onsetEnvelope(env);
   audioEnv = env;
   audioDur = buf.duration;
+  wavePeaks = buildPeaks(buf);
   audioName = name;
   audioBuffer = buf;                  // kept for export muxing — see the render handler
   shapeCache.clear();                 // every cached shaped array points at the OLD track now
@@ -3068,7 +3574,7 @@ function routeLevel(id, seconds) {
 const V = {};
 function evalParams() {
   const seconds = playhead * P.dur;
-  for (const band of Object.keys(BANDS)) audioLevel[band] = audioAt(band, seconds);
+  for (const band of SOURCES) audioLevel[band] = audioAt(band, seconds);
 
   for (const [id] of SPEC) {
     let v = hasEnv(id) ? envValue(id, playhead) : P[id];
@@ -3102,7 +3608,7 @@ for (const [id, digits] of SPEC) {          // pass 2: listeners
     P[id] = parseFloat(e.target.value);
     $("o-" + id).textContent = readout(id, digits, P[id]);
     if (id === "dpr") { dpr = P.dpr; resize(); }
-    if (id === "dur") updateClock();
+    if (id === "dur") { updateClock(); refreshLengthUI(); drawWave(); }
     markDirty(id);
     /* Auto-key: an armed envelope owns its parameter, so a drag has to write
        into the curve or it would appear to do nothing. */
@@ -3238,6 +3744,13 @@ function refreshKeyBtn(id) {
   const bits = [];
   if (n) bits.push(`${n} key${n === 1 ? "" : "s"}`);
   if (audible) bits.push(`audio ${a.band} ${a.depth > 0 ? "+" : ""}${a.depth.toFixed(2)}`);
+  const lbl = $("p-" + id).parentElement.querySelector("label");
+  let tag = lbl?.querySelector(".rtag");
+  if (audible && lbl) {
+    if (!tag) { tag = document.createElement("span"); tag.className = "rtag"; lbl.appendChild(tag); }
+    if (tag.dataset.band !== a.band) { tag.dataset.band = a.band; tag.textContent = a.band; }
+    tag.title = `Driven by ${a.band}, depth ${a.depth > 0 ? "+" : ""}${a.depth.toFixed(2)}`;
+  } else if (tag) tag.remove();
   btn.title = bits.length
     ? `${id}: ${bits.join(", ")} — click keys at playhead, alt-click removes`
     : `${id}: no automation — click to key at playhead`;
@@ -3301,9 +3814,11 @@ function refreshGroups() {
       ? `${driven} parameter${driven === 1 ? "" : "s"} driven in this group`
       : dirty ? "modified from default" : "";
   }
+  refreshTabFlags();
+  refreshRoutes();
 }
 
-const refreshKeyBtns = () => { for (const id of ANIM) refreshKeyBtn(id); refreshGroups(); };
+const refreshKeyBtns = () => { for (const id of ANIM) refreshKeyBtn(id); refreshGroups(); refreshLightBands(); };
 
 /* Single choke point for every envelope mutation — setKey, clearKey and all
    the lane header buttons route through here, so the group markers only need
@@ -3382,6 +3897,8 @@ function laneHead() {
   $("o-audDepth").textContent = (off ? 0 : a.depth).toFixed(2);
 
   $("audShapeToggle").disabled = off;
+  $("audShapePreset").disabled = off || !a.band;
+  $("audShapePreset").value = a.band ? shapeName(a) : "";
   if (off) $("audShapePanel").classList.add("hide");
   for (const [id, digits] of [["audAttack", 0], ["audRelease", 0], ["audLag", 0],
                                ["audGain", 2], ["audFloor", 3], ["audCurve", 2]]) {
@@ -3406,7 +3923,7 @@ function laneHead() {
 }
 
 function audMeters() {
-  for (const band of Object.keys(BANDS)) {
+  for (const band of SOURCES) {
     const v = audioLevel[band];
     $("m-" + band).style.width = (v * 100).toFixed(1) + "%";
     $("o-m" + band).textContent = v.toFixed(2);
@@ -3478,10 +3995,15 @@ function drawLane() {
 
   lctx.strokeStyle = CSSVAR("--rule", "#1e222a");
   lctx.lineWidth = g.s;
-  for (let i = 0; i <= 4; i++) {
-    const x = g.x(i / 4);
+  const grid = gridLines();
+  for (const [t, strong] of grid) {
+    const x = g.x(t);
+    lctx.globalAlpha = strong ? 1 : 0.45;
     lctx.beginPath(); lctx.moveTo(x, 0); lctx.lineTo(x, g.h); lctx.stroke();
   }
+  lctx.globalAlpha = 1;
+  // the track, faintly, so keys can be placed against what the audio is doing
+  drawPeaks(lctx, g.x(0), g.x(1), g.h, g.s, CSSVAR("--ink-dim", "#737b86"), 0.13);
 
   const live = CSSVAR("--live", "#ff5a3c");
   lctx.strokeStyle = live; lctx.globalAlpha = 0.5;
@@ -3641,6 +4163,7 @@ function captureObjectBasis() {
   const box = mesh.getBoundingBox(true);
   const sphere = box.getBoundingSphere(new THREE.Sphere());
   radius = Math.max(sphere.radius, 1e-4);
+  box.getCenter(objCentre);                // the light rig's origin, object space
   bounds.min = box.min.y;
   bounds.max = box.max.y;
 }
@@ -3802,6 +4325,9 @@ function pushUniforms() {
   U.cullS.value   = cullSize(V.cullS) * radius;
   U.sizeMul.value = V.scale;
   U.anisoLimit.value = V.anisoLimit;
+  U.ptIso.value   = V.ptIso;
+  U.ptDot.value   = ptDotSize(V.ptSize) * radius;
+  U.ptJit.value   = V.ptJit;
   U.dAmt.value    = V.dAmt * radius;
   U.dFrq.value    = V.dFrq / Math.max(radius, 1e-6);
   U.dSpd.value    = V.dSpd;
@@ -3916,8 +4442,12 @@ function pushUniforms() {
 }
 
 function updateClock() {
-  $("clock").textContent =
-    `${(playhead * P.dur).toFixed(2).padStart(5, "0")} / ${P.dur.toFixed(2)} s`;
+  let txt = `${(playhead * P.dur).toFixed(2).padStart(5, "0")} / ${P.dur.toFixed(2)} s`;
+  if (TL.mode === "bars") {
+    const beat = Math.min(Math.floor(playhead * TL.bars * TL.beats + 1e-6), TL.bars * TL.beats - 1);
+    txt += `  ${Math.floor(beat / TL.beats) + 1}.${(beat % TL.beats) + 1}`;
+  }
+  $("clock").textContent = txt;
   $("t-time").textContent = playhead.toFixed(3);
 }
 
@@ -4024,6 +4554,7 @@ async function loadSplat(source, label) {
      empty pickedPoint would silently fall through to focalDistance = 0. */
   clearPick();
   pickCache = null;
+  splatLoading = true;
 
   loadBytesLog = [];
   $("drop").classList.add("hide");
@@ -4101,10 +4632,12 @@ async function loadSplat(source, label) {
     refreshCamUI();
 
     const n = splatCount(mesh).toLocaleString();
+    nrmLoadedAt = performance.now();
     $("t-splats").textContent = n;
     $("t-state").textContent = "idle";
     assetLabel = label;
     setStatus(`${label} — ${n} gaussians.`);
+    showStartCard();
   } catch (err) {
     endParsePhase();
     console.error(err);
@@ -4112,6 +4645,8 @@ async function loadSplat(source, label) {
     $("t-state").textContent = "error";
     $("drop").classList.remove("hide");
     if (mesh) { scene.remove(mesh); mesh = null; }
+  } finally {
+    splatLoading = false;
   }
 }
 
@@ -4663,7 +5198,12 @@ function setPickMode(on, target = pickTarget) {
   focusToggle.classList.toggle("on", focusOn);
   focusToggle.setAttribute("aria-pressed", String(focusOn));
   focusToggle.querySelector(".lbl").textContent = focusOn ? "Picking…" : "Focus";
-  const label = pickTarget === "pivot" ? "Pick pivot" : "Pick focus";
+  for (let n = 1; n <= LT_N; n++) {
+    const b = $("ltPlace" + n), on2 = on && pickTarget === "light" && ltPlaceSlot === n;
+    b.classList.toggle("on", on2);
+    b.textContent = on2 ? "Click model…" : "Place";
+  }
+  const label = pickTarget === "pivot" ? "Pick pivot" : pickTarget === "light" ? `Place light ${ltPlaceSlot}` : "Pick focus";
   if (on && mesh && !pickCache) {
     const c = buildPickCache();
     if (c) setStatus(`${label} armed — cached ${c.n.toLocaleString()} splats in ${c.ms}ms. Tap the model.`);
@@ -4726,6 +5266,21 @@ renderer.domElement.addEventListener("pointerdown", (ev) => {
   const t = depth / Math.max(ray.ray.direction.dot(fwd), 1e-4);
   const worldPt = ray.ray.origin.clone().addScaledVector(ray.ray.direction, t);
 
+  if (pickTarget === "light") {
+    /* Just in front of the clicked surface, toward the camera — a light
+       sitting exactly ON the surface burns a hotspot into it. */
+    const n = ltPlaceSlot;
+    const toCam = camera.position.clone().sub(worldPt).normalize();
+    worldPt.addScaledVector(toCam, 0.12 * radius);
+    writeLightLocal(n, ltLocalFromWorld(worldPt));
+    if (!(P.ltAmt > 0)) { setParam("ltAmt", 1); }
+    if (!(P[`ltI${n}`] > 0)) { setParam(`ltI${n}`, 1); }
+    pushUniforms();
+    setPickMode(false);
+    setStatus(`Light ${n} placed. Drag its marker to fine-tune.`);
+    return;
+  }
+
   if (pickTarget === "pivot") {
     /* Camera position and rotation are left completely untouched — no
        lookAt, no reposition. OrbitControls derives its internal spherical
@@ -4781,6 +5336,7 @@ function updateShaderUniforms() {
   u.planeSwing.value   = Math.tan(clampDeg75(V.planeSwing) * (Math.PI / 180));
   u.nearBoost.value    = V.nearBoost;
   u.splatOpacity.value = Math.pow(2, V.splatOpacity);
+  pushLightUniforms(u);
 }
 
 /* Optics — plain SparkRenderer properties, same per-frame discipline and the
@@ -4797,6 +5353,431 @@ function updateShaderUniforms() {
 function updateOptics() {
   spark.blurAmount = V.blurAmount;
 }
+
+/* ------------------------------------------------------------------ *
+ * Lights — runtime. Positions live in a RIG frame centred on the
+ * capture's bbox centre, with WORLD axes (so +Y is up on screen after the
+ * default 180° load flip — FX Bench's first cut used raw object space and
+ * +Y moved a light down):
+ *   world = centreW + rig · (local · spread) · radius
+ *   rig   = yaw (Rig rotate + 360° · Orbit · playhead), then tilt
+ * Orbit is measured in turns per timeline loop, so it is a pure function of
+ * the playhead: deterministic under scrub and export, and seamless at the
+ * loop point for whole numbers. Everything is uniforms; nothing re-bakes.
+ * ------------------------------------------------------------------ */
+const _ltM = new THREE.Matrix4(), _ltV = new THREE.Vector3(), _ltC = new THREE.Color(), _ltH = new THREE.Color();
+const _ltQ = new THREE.Quaternion(), _ltE = new THREE.Euler(), _ltCW = new THREE.Vector3(), _ltL = new THREE.Vector3();
+const ltNum = (id, d) => (Number.isFinite(V[id]) ? V[id] : d);
+function ltRig() {
+  const yaw = ltNum("ltYaw", 0) + 360 * ltNum("ltOrb", 0) * playhead;
+  _ltE.set(ltNum("ltPitch", 0) * DEG, yaw * DEG, 0, "YXZ");
+  _ltQ.setFromEuler(_ltE);
+  _ltCW.copy(objCentre);
+  if (mesh) { mesh.updateMatrixWorld(); _ltCW.applyMatrix4(mesh.matrixWorld); }
+  return { q: _ltQ, centre: _ltCW, R: Math.max(radius, 1e-4), S: Math.max(ltNum("ltSpread", 1), 1e-3) };
+}
+function ltWorld(k, out = new THREE.Vector3()) {
+  const n = k + 1, g = ltRig();
+  out.set(ltNum(`ltX${n}`, 0), ltNum(`ltY${n}`, 0), ltNum(`ltZ${n}`, 0));
+  return out.multiplyScalar(g.S).applyQuaternion(g.q).multiplyScalar(g.R).add(g.centre);
+}
+/* Inverse, for placing and dragging: a world point -> rig-local fields. */
+function ltLocalFromWorld(world) {
+  const g = ltRig();
+  const inv = g.q.clone().invert();
+  return world.clone().sub(g.centre).divideScalar(g.R).applyQuaternion(inv).divideScalar(g.S);
+}
+const ltColour = (n, out) => {
+  _ltH.setHSL(ltNum(`ltHue${n}`, 0), 1, 0.5);
+  return out.setRGB(1, 1, 1).lerp(_ltH, ltNum(`ltSat${n}`, 0));
+};
+let ltSwatchKey = "";
+function pushLightUniforms(u) {
+  const f = ltNum;
+  u.uLtAmt.value = Math.max(f("ltAmt", 0), 0);
+  u.uLtBase.value = 1 - f("ltDark", 0.3);
+  u.uLtAdd.value = f("ltAdd", 0.6);
+  u.uLtEmit.value = f("ltEmit", 1);
+  u.uLtFall.value = Math.max(f("ltFall", 1), 1e-3);   // pow(0, <=0) is undefined in GLSL
+  u.uLtNrm.value = Math.max(f("ltNrm", 0), 0);
+  u.uLtWrap.value = Math.max(f("ltWrap", 0.5), 0);
+  u.uLtRim.value = Math.max(f("ltRim", 0), 0);
+  u.uLtRimPow.value = Math.max(f("ltRimPow", 3), 0.05);
+  maybeAutoNormals();
+  pushNormalUniforms(u);
+  camera.updateMatrixWorld();
+  _ltM.copy(camera.matrixWorld).invert();
+  const R = Math.max(radius, 1e-4);
+  let key = "";
+  for (let k = 0; k < LT_N; k++) {
+    const n = k + 1;
+    u.uLtPos.value[k].copy(ltWorld(k, _ltV).applyMatrix4(_ltM));
+    ltColour(n, _ltC);
+    u.uLtCol.value[k].set(_ltC.r, _ltC.g, _ltC.b);
+    u.uLtI.value[k] = Math.max(f(`ltI${n}`, 0), 0);
+    u.uLtR.value[k] = Math.max(f(`ltR${n}`, 1) * R, 1e-6);   // smoothstep(0, 0, d) is undefined
+    key += _ltC.getHexString();
+  }
+  if (key !== ltSwatchKey) {             // DOM only when a colour actually changed
+    ltSwatchKey = key;
+    for (let n = 1; n <= LT_N; n++) $("ltSw" + n).style.background = "#" + key.slice((n - 1) * 6, n * 6);
+  }
+}
+
+/* --- markers: an HTML overlay, never drawn in the three.js scene, so they
+   can never land in an export frame. Shown while the Lights section is open
+   (or a light is being placed); draggable in the screen plane at the
+   light's current depth. --- */
+const ltMarks = [];
+for (let n = 1; n <= LT_N; n++) {
+  const el = document.createElement("div");
+  el.className = "ltmark";
+  el.textContent = String(n);
+  el.title = `Light ${n} — drag to move it`;
+  $("ltMarks").appendChild(el);
+  ltMarks.push(el);
+  el.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    const w = ltWorld(n - 1);
+    ltDrag = { n, el, ndcZ: w.project(camera).z };
+    el.setPointerCapture(ev.pointerId);
+  });
+  el.addEventListener("pointermove", (ev) => {
+    if (!ltDrag || ltDrag.n !== n) return;
+    const r = renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector3(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1, ltDrag.ndcZ);
+    const world = ndc.unproject(camera);
+    writeLightLocal(n, ltLocalFromWorld(world));
+  });
+  const end = () => { if (ltDrag?.n === n) ltDrag = null; };
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+}
+let ltDrag = null;
+/* Through each slider's own `input` event — the single write path (auto-key
+   on an armed envelope, dirty marks, pushUniforms). */
+function writeLightLocal(n, local) {
+  for (const [ax, v] of [["X", local.x], ["Y", local.y], ["Z", local.z]]) {
+    const el = $(`p-lt${ax}${n}`);
+    el.value = String(clampNum(v, parseFloat(el.min), parseFloat(el.max)));
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}
+function lightsOpen() {
+  const d = document.querySelector('.mod[data-group="lights"]');
+  return !!(d && d.open && d.offsetParent !== null);
+}
+const _mkV = new THREE.Vector3();
+function updateLightMarks() {
+  const placing = pickOn && pickTarget === "light";
+  const show = !!mesh && !rendering && (placing || ltDrag || (lightsOpen() && ltNum("ltAmt", 0) > 0));
+  $("ltMarks").style.display = show ? "" : "none";
+  if (!show) return;
+  const W = renderer.domElement.clientWidth, H = renderer.domElement.clientHeight;
+  for (let k = 0; k < LT_N; k++) {
+    const el = ltMarks[k], n = k + 1;
+    const p = ltWorld(k, _mkV).project(camera);
+    const vis = p.z < 1 && p.z > -1;
+    el.style.display = vis ? "" : "none";
+    if (!vis) continue;
+    el.style.left = ((p.x + 1) * 0.5 * W).toFixed(1) + "px";
+    el.style.top = ((1 - p.y) * 0.5 * H).toFixed(1) + "px";
+    el.style.color = "#" + ltColour(n, _ltC).getHexString();
+    el.classList.toggle("dim", !(ltNum(`ltI${n}`, 0) > 0) && !(AUD[`ltI${n}`]?.band));
+  }
+}
+
+/* --- per-light band chip: a shortcut onto the ordinary audio route for
+   that light's Intensity, so the lane, the Routes list and presets all see
+   the same thing. Per-band shaping defaults from FX Bench's Band lanterns. */
+const BAND_SHAPE = { low: "smooth", mid: "punchy", high: "punchy", hit: "punchy" };
+function setRoute(id, band, depth, shape) {
+  const a = audOf(id);
+  a.band = band;
+  if (band) {
+    if (depth != null) a.depth = depth;
+    else if (!a.depth) a.depth = 0.3;
+    Object.assign(a, SHAPE_PRESETS[shape ?? BAND_SHAPE[band]] ?? {});
+  } else {
+    a.depth = 0;
+  }
+  refreshRoutes();
+  refreshKeyBtn(id);
+  refreshGroups();
+  if (focused === id) laneHead();
+  pushUniforms();
+  syncSliders();
+}
+function refreshLightBands() {
+  for (let n = 1; n <= LT_N; n++) {
+    const sel = $("ltBand" + n);
+    if (!sel) continue;
+    const b = AUD[`ltI${n}`]?.depth ? AUD[`ltI${n}`].band || "" : "";
+    if (sel.value !== b) sel.value = b;
+    sel.classList.toggle("on", !!b);
+  }
+}
+for (let n = 1; n <= LT_N; n++) {
+  $("ltBand" + n).onchange = (e) => {
+    const b = e.target.value;
+    setRoute(`ltI${n}`, b, b ? (AUD[`ltI${n}`]?.depth || 0.35) : 0);
+    if (b && !(V.ltAmt > 0)) setParam("ltAmt", 1), pushUniforms();
+    refreshLightBands();
+    setStatus(b ? `Light ${n} follows the ${b} band${audioEnv ? "" : " — load audio to hear it move"}.` : `Light ${n} no longer follows audio.`);
+  };
+  $("ltPlace" + n).onclick = () => {
+    if (pickOn && pickTarget === "light" && ltPlaceSlot === n) { setPickMode(false); return; }
+    ltPlaceSlot = n;
+    setPickMode(true, "light");
+  };
+}
+let ltPlaceSlot = 1;
+
+/* ------------------------------------------------------------------ *
+ * Surface directions for Shading/Rim — FX Bench Light S, verbatim apart
+ * from naming. Per-splat normal = smallest eigenvector of the covariance of
+ * its k nearest splat CENTRES (a splat's own smallest axis is not a usable
+ * normal). Planarity 1 - λmin/λmid is the confidence; low-planarity splats
+ * stay distance-only. Partitioned over up to 8 workers with halos, ties
+ * broken on the global index, so the result is independent of the worker
+ * count. Lowry 1.81M measured 2.8 s; 44k is instant.
+ * ------------------------------------------------------------------ */
+const NRM_WORKER_SRC = `
+const jacobi3 = (a) => {
+  const v = [1,0,0, 0,1,0, 0,0,1];
+  for (let sweep = 0; sweep < 12; sweep++) {
+    const off = a[1]*a[1] + a[2]*a[2] + a[5]*a[5];
+    if (off < 1e-30) break;
+    for (const [p, q] of [[0,1],[0,2],[1,2]]) {
+      const apq = a[p*3+q];
+      if (Math.abs(apq) < 1e-30) continue;
+      const app = a[p*3+p], aqq = a[q*3+q];
+      const th = (aqq - app) / (2 * apq);
+      const t = Math.sign(th || 1) / (Math.abs(th) + Math.sqrt(th*th + 1));
+      const c = 1 / Math.sqrt(t*t + 1), s = t * c;
+      for (let k = 0; k < 3; k++) { const akp = a[k*3+p], akq = a[k*3+q]; a[k*3+p] = c*akp - s*akq; a[k*3+q] = s*akp + c*akq; }
+      for (let k = 0; k < 3; k++) { const apk = a[p*3+k], aqk = a[q*3+k]; a[p*3+k] = c*apk - s*aqk; a[q*3+k] = s*apk + c*aqk; }
+      for (let k = 0; k < 3; k++) { const vkp = v[k*3+p], vkq = v[k*3+q]; v[k*3+p] = c*vkp - s*vkq; v[k*3+q] = s*vkp + c*vkq; }
+    }
+  }
+  return { vals: [a[0], a[4], a[8]], vecs: v };
+};
+const HX = 73856093, HY = 19349663, HZ = 83492791;
+function buildGrid(pos, n, cell) {
+  let tb = 1; while (tb < n * 2) tb <<= 1;
+  const mask = tb - 1, inv = 1 / cell;
+  const key = new Uint32Array(n), start = new Uint32Array(tb + 1);
+  for (let i = 0; i < n; i++) {
+    const h = (Math.imul(Math.floor(pos[i*3] * inv), HX) ^ Math.imul(Math.floor(pos[i*3+1] * inv), HY) ^ Math.imul(Math.floor(pos[i*3+2] * inv), HZ)) & mask;
+    key[i] = h; start[h + 1]++;
+  }
+  for (let h = 0; h < tb; h++) start[h + 1] += start[h];
+  const order = new Uint32Array(n), fill = start.slice(0, tb);
+  for (let i = 0; i < n; i++) order[fill[key[i]]++] = i;
+  return { mask, inv, start, order };
+}
+const VK = new Int32Array(1 << 15), VS = new Uint32Array(1 << 15); let VG = 0;
+const visit = (h) => { let s = (Math.imul(h, 2654435761) >>> 17) & 32767; while (VS[s] === VG) { if (VK[s] === h) return false; s = (s + 1) & 32767; } VS[s] = VG; VK[s] = h; return true; };
+let GID = null;
+const before = (d2, j, q, outD, outI) => outD[q] > d2 || (outD[q] === d2 && (GID ? GID[outI[q]] > GID[j] : outI[q] > j));
+function knn(pos, g, i, k, outI, outD, maxRing, approx) {
+  const x = pos[i*3], y = pos[i*3+1], z = pos[i*3+2];
+  const cx = Math.floor(x * g.inv), cy = Math.floor(y * g.inv), cz = Math.floor(z * g.inv);
+  let found = 0, ring = 1;
+  for (; ring <= maxRing; ring++) {
+    found = 0; VG++;
+    for (let dx = -ring; dx <= ring; dx++) for (let dy = -ring; dy <= ring; dy++) for (let dz = -ring; dz <= ring; dz++) {
+      const h = (Math.imul(cx+dx, HX) ^ Math.imul(cy+dy, HY) ^ Math.imul(cz+dz, HZ)) & g.mask;
+      if (!visit(h)) continue;
+      for (let p = g.start[h], e = g.start[h+1]; p < e; p++) {
+        const j = g.order[p];
+        const px = pos[j*3], py = pos[j*3+1], pz = pos[j*3+2];
+        if (Math.abs(Math.floor(px * g.inv) - cx) > ring || Math.abs(Math.floor(py * g.inv) - cy) > ring || Math.abs(Math.floor(pz * g.inv) - cz) > ring) continue;
+        const ex = px-x, ey = py-y, ez = pz-z, d2 = ex*ex+ey*ey+ez*ez;
+        if (found < k) {
+          let q = found++;
+          while (q > 0 && before(d2, j, q-1, outD, outI)) { outD[q] = outD[q-1]; outI[q] = outI[q-1]; q--; }
+          outD[q] = d2; outI[q] = j;
+        } else if (before(d2, j, k-1, outD, outI)) {
+          let q = k - 1;
+          while (q > 0 && before(d2, j, q-1, outD, outI)) { outD[q] = outD[q-1]; outI[q] = outI[q-1]; q--; }
+          outD[q] = d2; outI[q] = j;
+        }
+      }
+    }
+    if (found >= k) { if (approx) break; const R = ring / g.inv; if (outD[k-1] <= R * R) break; }
+  }
+  return { found: Math.min(found, k), ring: Math.min(ring, maxRing) };
+}
+function measure({ pos, k, sample }) {
+  const n = pos.length / 3;
+  GID = null;
+  let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < n; i++) for (let a = 0; a < 3; a++) { const v = pos[i*3+a]; if (v < mn[a]) mn[a] = v; if (v > mx[a]) mx[a] = v; }
+  const vol = Math.max((mx[0]-mn[0]) * (mx[1]-mn[1]) * (mx[2]-mn[2]), 1e-12);
+  const c0 = Math.cbrt(vol / n) * 2;
+  const g0 = buildGrid(pos, n, c0);
+  const oi = new Uint32Array(k), od = new Float64Array(k);
+  const S = Math.min(sample, n), dk = new Float64Array(S);
+  let seed = 12345; const rnd = () => ((seed = Math.imul(seed ^ (seed >>> 15), 2246822519) + 1) >>> 0) / 4294967296;
+  for (let s = 0; s < S; s++) { const r = knn(pos, g0, Math.floor(rnd() * n), k, oi, od, 12, false); dk[s] = Math.sqrt(od[Math.max(0, r.found - 1)]); }
+  dk.sort();
+  return { medDk: dk[S >> 1], c0, bbox: [mn, mx] };
+}
+function normals({ pos, op, gid, nOwn, nCalc, k, cell, maxRing, approx, weight, smooth, sk }) {
+  const n = pos.length / 3;
+  GID = gid;
+  const g = buildGrid(pos, n, cell);
+  const oi = new Uint32Array(k), od = new Float64Array(k), C = new Float64Array(9), w = new Float64Array(k);
+  const N = new Float32Array(nCalc * 3), PL = new Float32Array(nCalc);
+  const nbr = smooth > 0 ? new Uint32Array(nOwn * sk) : null, nbrN = smooth > 0 ? new Uint8Array(nOwn) : null;
+  const inv2s2 = 1 / (2 * cell * cell);
+  for (let i = 0; i < nCalc; i++) {
+    const r = knn(pos, g, i, k, oi, od, maxRing, approx);
+    if (nbr && i < nOwn) { const m = Math.min(sk, r.found); for (let q = 0; q < m; q++) nbr[i*sk+q] = oi[q]; nbrN[i] = m; }
+    if (r.found < 3) { PL[i] = 0; continue; }
+    let W = 0, mx_ = 0, my_ = 0, mz_ = 0;
+    for (let q = 0; q < r.found; q++) {
+      const j = oi[q];
+      let wq = 1;
+      if (weight >= 1) wq *= Math.max(op[j], 1e-3);
+      if (weight >= 2) wq *= Math.exp(-od[q] * inv2s2);
+      w[q] = wq; W += wq; mx_ += wq*pos[j*3]; my_ += wq*pos[j*3+1]; mz_ += wq*pos[j*3+2];
+    }
+    mx_ /= W; my_ /= W; mz_ /= W;
+    C.fill(0);
+    for (let q = 0; q < r.found; q++) {
+      const j = oi[q], wq = w[q], ex = pos[j*3]-mx_, ey = pos[j*3+1]-my_, ez = pos[j*3+2]-mz_;
+      C[0] += wq*ex*ex; C[1] += wq*ex*ey; C[2] += wq*ex*ez; C[4] += wq*ey*ey; C[5] += wq*ey*ez; C[8] += wq*ez*ez;
+    }
+    C[3] = C[1]; C[6] = C[2]; C[7] = C[5];
+    const e = jacobi3(C);
+    let i0 = 0, i1 = 1, i2 = 2;
+    if (e.vals[i0] > e.vals[i1]) [i0, i1] = [i1, i0];
+    if (e.vals[i1] > e.vals[i2]) [i1, i2] = [i2, i1];
+    if (e.vals[i0] > e.vals[i1]) [i0, i1] = [i1, i0];
+    const lmin = Math.max(e.vals[i0], 0), lmid = Math.max(e.vals[i1], 0);
+    PL[i] = lmid > 0 ? 1 - lmin / lmid : 0;
+    let nx = e.vecs[i0], ny = e.vecs[3+i0], nz = e.vecs[6+i0];
+    const L = Math.hypot(nx, ny, nz) || 1;
+    N[i*3] = nx / L; N[i*3+1] = ny / L; N[i*3+2] = nz / L;
+  }
+  for (let pass = 0; pass < smooth; pass++) {
+    const S = new Float32Array(N);
+    for (let i = 0; i < nOwn; i++) {
+      let sx = N[i*3] * PL[i], sy = N[i*3+1] * PL[i], sz = N[i*3+2] * PL[i];
+      for (let q = 0; q < nbrN[i]; q++) {
+        const j = nbr[i*sk+q]; if (j >= nCalc) continue;
+        const wq = PL[j] * Math.max(op[j], 1e-3);
+        const d = N[j*3]*N[i*3] + N[j*3+1]*N[i*3+1] + N[j*3+2]*N[i*3+2];
+        const sgn = d < 0 ? -wq : wq;
+        sx += N[j*3]*sgn; sy += N[j*3+1]*sgn; sz += N[j*3+2]*sgn;
+      }
+      const L = Math.hypot(sx, sy, sz);
+      if (L > 1e-12) { S[i*3] = sx / L; S[i*3+1] = sy / L; S[i*3+2] = sz / L; }
+    }
+    N.set(S.subarray(0, nOwn * 3));
+  }
+  const out = new Uint8Array(nOwn * 4);
+  for (let i = 0; i < nOwn; i++) {
+    out[i*4] = Math.round(N[i*3] * 127.5 + 127.5); out[i*4+1] = Math.round(N[i*3+1] * 127.5 + 127.5);
+    out[i*4+2] = Math.round(N[i*3+2] * 127.5 + 127.5); out[i*4+3] = Math.round(Math.min(Math.max(PL[i], 0), 1) * 255);
+  }
+  return { out };
+}
+onmessage = (ev) => {
+  const d = ev.data;
+  if (d.type === "measure") postMessage(measure(d));
+  else { const r = normals(d); postMessage(r, [r.out.buffer]); }
+};`;
+
+let nrmWorkerURL = null;
+const NRM = { key: null, tex: null, data: null, stats: null, busy: null, w: 4096, failed: null };
+const nrmRun = (msg, transfer = []) => new Promise((resolve, reject) => {
+  nrmWorkerURL ||= URL.createObjectURL(new Blob([NRM_WORKER_SRC], { type: "text/javascript" }));
+  const w = new Worker(nrmWorkerURL);
+  w.onmessage = (e) => { w.terminate(); resolve(e.data); };
+  w.onerror = (e) => { w.terminate(); reject(new Error(e.message)); };
+  w.postMessage(msg, transfer);
+});
+const nrmKeyBase = () => `${assetLabel}|${mesh?.numSplats}|`;
+async function computeNormals({ k = 24, sample = 4000, maxRing = 3, approx = true, weight = 2, smooth = 2, sk = 16,
+                                 workers = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 2)),
+                                 cellMul = 0.6, force = false } = {}) {
+  if (!mesh) throw new Error("no capture loaded");
+  const key = nrmKeyBase() + `k${k}|s${smooth}`;
+  if (!force && NRM.key === key && NRM.stats) return NRM.stats;
+  if (NRM.busy) await NRM.busy.catch(() => {});
+  NRM.busy = (async () => {
+    const t0 = performance.now();
+    const n = mesh.numSplats, pos = new Float32Array(n * 3), op = new Float32Array(n);
+    mesh.forEachSplat((i, c, sc, q, o) => { pos[i*3] = c.x; pos[i*3+1] = c.y; pos[i*3+2] = c.z; op[i] = o ?? 1; });
+    const m = await nrmRun({ type: "measure", pos, k, sample });
+    const cell = Math.max(m.medDk * cellMul, 1e-9);
+    const ext = [0, 1, 2].map((a) => m.bbox[1][a] - m.bbox[0][a]);
+    const ax = ext.indexOf(Math.max(...ext));
+    const Wn = Math.max(1, Math.min(workers, 16));
+    const samp = []; for (let s = 0; s < 20000; s++) samp.push(pos[Math.floor((s / 20000) * n) * 3 + ax]);
+    samp.sort((x, y) => x - y);
+    const bnd = [-Infinity]; for (let t = 1; t < Wn; t++) bnd.push(samp[Math.floor((t / Wn) * samp.length)]); bnd.push(Infinity);
+    const H1 = (maxRing + 1) * cell, H = smooth > 0 ? 2 * H1 : H1;
+    const slabs = [];
+    for (let t = 0; t < Wn; t++) {
+      const lo = bnd[t], hi = bnd[t + 1];
+      const own = [], calcHalo = [], farHalo = [];
+      for (let i = 0; i < n; i++) {
+        const v = pos[i*3+ax];
+        if (v >= lo && v < hi) own.push(i);
+        else if (v >= lo - H1 && v < hi + H1) calcHalo.push(i);
+        else if (v >= lo - H && v < hi + H) farHalo.push(i);
+      }
+      const idx = Uint32Array.from([...own, ...calcHalo, ...farHalo]);
+      const sp = new Float32Array(idx.length * 3), so = new Float32Array(idx.length);
+      for (let q = 0; q < idx.length; q++) { const i = idx[q]; sp[q*3] = pos[i*3]; sp[q*3+1] = pos[i*3+1]; sp[q*3+2] = pos[i*3+2]; so[q] = op[i]; }
+      slabs.push({ own: Uint32Array.from(own), msg: { type: "normals", pos: sp, op: so, gid: idx, nOwn: own.length,
+        nCalc: smooth > 0 ? own.length + calcHalo.length : own.length, k, cell, maxRing, approx, weight, smooth, sk } });
+    }
+    const res = await Promise.all(slabs.map((s) => nrmRun(s.msg, [s.msg.pos.buffer, s.msg.op.buffer, s.msg.gid.buffer])));
+    const W = NRM.w, Hh = Math.ceil(n / W);
+    const data = new Uint8Array(W * Hh * 4);
+    res.forEach((r, t) => {
+      const own = slabs[t].own;
+      for (let q = 0; q < own.length; q++) data.set(r.out.subarray(q * 4, q * 4 + 4), own[q] * 4);
+    });
+    NRM.tex?.dispose();
+    const tex = new THREE.DataTexture(data, W, Hh, THREE.RGBAFormat, THREE.UnsignedByteType);
+    tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.flipY = false;
+    tex.colorSpace = THREE.NoColorSpace; tex.needsUpdate = true;
+    NRM.tex = tex; NRM.data = data.subarray(0, n * 4); NRM.key = key;
+    NRM.stats = { n, workers: Wn, ms: performance.now() - t0 };
+    return NRM.stats;
+  })();
+  try { return await NRM.busy; } finally { NRM.busy = null; }
+}
+const nrmFresh = () => !!(NRM.tex && NRM.key && mesh && NRM.key.startsWith(nrmKeyBase()));
+/* On demand: once Shading or Rim is above 0, a capture is loaded and the
+   load has SETTLED (computing inside the load path measured up to 6x
+   slower in FX Bench — Spark is still generating and sorting). */
+function maybeAutoNormals() {
+  if (!(ltNum("ltNrm", 0) > 0) || !(ltNum("ltAmt", 0) > 0) || !mesh || splatLoading || NRM.busy || nrmFresh() || rendering) return;
+  if (performance.now() - nrmLoadedAt < 1500) return;
+  if (NRM.failed === nrmKeyBase()) return;
+  setStatus("Lights: estimating surface directions in the background…");
+  computeNormals().then((st) => {
+    setStatus(`Lights: shading ready — ${st.n.toLocaleString()} splats in ${(st.ms / 1000).toFixed(1)} s.`);
+  }).catch((e) => { NRM.failed = nrmKeyBase(); setStatus("Surface directions failed: " + e.message, true); });
+}
+const _nrmM4 = new THREE.Matrix4();
+function pushNormalUniforms(u) {
+  if (!nrmFresh()) { u.uNrmN.value = 0; return; }   // no normals => every splat distance-only
+  u.uNrmTex.value = NRM.tex; u.uNrmW.value = NRM.w; u.uNrmN.value = NRM.data.length / 4;
+  const mp = (spark.display?.mapping || []).find((m) => m.node === mesh);
+  u.uNrmBase.value = mp ? mp.base : 0;
+  camera.updateMatrixWorld(); mesh.updateMatrixWorld();
+  _nrmM4.copy(camera.matrixWorld).invert().multiply(mesh.matrixWorld);
+  u.uNrmMat.value.getNormalMatrix(_nrmM4);
+}
+
 
 function setCamMode(mode) {
   camMode = mode;
@@ -4954,6 +5935,7 @@ function frame(now) {
   updateDofFocus();
   updateShaderUniforms();
   updateOptics();
+  updateLightMarks();
   postMat.uniforms.seed.value = grainFrame;
   grainFrame = (grainFrame + 1) % 4096;
   renderWithPost();
@@ -5228,7 +6210,7 @@ $("render").onclick = async () => {
    follow. */
 const PRESET_FORMAT = "gausseous-preset";
 const PRESET_FORMAT_LEGACY = "splat-bench-preset";
-const PRESET_VERSION = 6;   // v2 selects; v3 audio; v4 regions+mask; v5 camera keyframes; v6 depth of field re-expressed
+const PRESET_VERSION = 7;   // v2 selects; v3 audio; v4 regions+mask; v5 camera keyframes; v6 depth of field re-expressed; v7 points, lights, timeline length, hit source
 /* `mobileMode` is deliberately absent: it is a property of the device you are
    sitting at, not of the look. A preset saved on a desktop must not force a
    phone back to full pixel ratio, nor the reverse. */
@@ -5266,6 +6248,7 @@ function serialize() {
        a transform saved against one capture and loaded against another is
        meaningless; harmless, and not worth guarding against. */
     transform: { ...xform },
+    timeline: { ...TL },
     regions: region.map((r) => ({ shape: r.shape, mode: r.mode, invert: r.invert })),
     mask: Object.fromEntries(
       Object.entries(MASK)
@@ -5326,6 +6309,14 @@ function applyPreset(o) {
     $("o-" + id).textContent = readout(id, digits, P[id]);
     markDirty(id);
   }
+  /* v7 added Points and Lights. A preset older than that never had them, so
+     it must not inherit whatever this session last set — reset them rather
+     than apply the general "missing keeps its current value" rule. */
+  if (o.version < 7) {
+    for (const [id, , g] of SPEC) {
+      if ((g === "points" || g === "lights") && id !== "blurAmount") setParam(id, parseFloat(DEFAULT[id]));
+    }
+  }
   dpr = P.dpr;
   resize();
 
@@ -5371,7 +6362,7 @@ function applyPreset(o) {
   audioLoop = !!o.audio?.loop;                    // additive; absent means false
   for (const [id, src] of Object.entries(o.audio?.routes ?? {})) {
     if (!ANIM.includes(id)) continue;
-    if (!Object.hasOwn(BANDS, src?.band)) continue;
+    if (!SOURCES.includes(src?.band)) continue;
     /* Shaping fields are additive (v6, no version bump — same rule as the
        Region phase's shrink parameter): a v3-v5 preset has none of them, and
        audOf()'s own defaults above already stand in for "no shaping", which
@@ -5601,11 +6592,26 @@ function applyPreset(o) {
     }
   }
 
+  /* v7 timeline — additive; absent means Seconds, which is what every older
+     preset's Duration already meant. Not re-applied here: p-dur was
+     restored with the other params above, and recomputing a "track" length
+     against whatever track happens to be loaded would silently change it. */
+  {
+    const t = o.timeline;
+    TL.mode = ["seconds", "track", "bars"].includes(t?.mode) ? t.mode : "seconds";
+    const num = (v, d, lo, hi) => (Number.isFinite(v) ? clamp(v, lo, hi) : d);
+    TL.trackN = Math.round(num(t?.trackN, 1, 1, 64));
+    TL.bpm = num(t?.bpm, 120, 20, 300);
+    TL.bars = Math.round(num(t?.bars, 4, 1, 256));
+    TL.beats = Math.round(num(t?.beats, 4, 1, 16));
+  }
+
   pushUniforms();
   syncSliders();
   refreshKeyBtns();
   laneHead();
   refreshAudioLoopUI();
+  refreshRoutes(true);
   audioSeek();
   audioFollow();
   drawLane();
@@ -5642,8 +6648,13 @@ function applyPreset(o) {
    block, not here — laneHead() is called at boot, long before this module
    runs, and now calls refreshGestureUI(), which reads GEST. */
 
-const paramLabel = (id) =>
-  $("p-" + id).parentElement.querySelector("label")?.textContent.trim() ?? id;
+const paramLabel = (id) => {
+  const l = $("p-" + id)?.parentElement.querySelector("label");
+  if (!l) return id;
+  let t = "";
+  for (const n of l.childNodes) if (n.nodeType === 3) t += n.textContent;
+  return t.trim() || id;
+};
 
 /* Binding an axis already held by another parameter displaces the previous
    holder rather than refusing (unchanged rule from the old chip strip). A
@@ -5881,54 +6892,411 @@ function drawSparkline() {
 }
 addEventListener("resize", drawSparkline);
 
-$("audLoad").onclick = () => $("audioFile").click();
+$("audLoad").onclick = $("audLoad2").onclick = () => $("audioFile").click();
 
-/* Loop / Duration x N.
- *
- * "x set" writes Duration through the p-dur slider's own `input` event rather
- * than assigning P.dur — the slider is the single write path for every
- * parameter (auto-key on an armed envelope, dirty marking, the dur/dpr side
- * effects, pushUniforms all hang off it), and a second one is exactly what
- * the gesture phase went out of its way not to add. */
-function refreshAudioLoopUI() {
-  const has = !!audioDur;
-  $("audLoopBtn").disabled = !has;
-  $("audFitDur").disabled = !has;
-  $("audLoops").disabled = !has;
-  $("audLoopBtn").classList.toggle("on", audioLoop);
-  const n = loopCount();
-  $("audFitDur").textContent = has ? `= ${(audioDur * n).toFixed(2)}s` : "× set";
-  $("audFitDur").title = has
-    ? `Set Duration to ${n} × ${audioDur.toFixed(2)}s = ${(audioDur * n).toFixed(2)}s`
-    : "Load a track first";
+
+/* ------------------------------------------------------------------ *
+ * Timeline length — one control in the transport bar instead of Duration
+ * under Camera plus Loop and "x set" under Audio. Duration (p-dur) is still
+ * the single SPEC write path; the modes only decide what gets written.
+ * ------------------------------------------------------------------ */
+function lengthFor(mode) {
+  if (mode === "track") return audioDur > 0 ? audioDur * TL.trackN : null;
+  if (mode === "bars") return (TL.bars * TL.beats * 60) / TL.bpm;
+  return null;
 }
-function loopCount() {
-  const max = audioDur > 0 ? Math.max(1, Math.floor(Number($("p-dur").max) / audioDur)) : 64;
-  return Math.max(1, Math.min(max, Math.round(Number($("audLoops").value) || 1)));
+function applyLength() {
+  const d = lengthFor(TL.mode);
+  if (d != null) {
+    const el = $("p-dur");
+    el.value = String(clampNum(d, parseFloat(el.min), parseFloat(el.max)));
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    if (TL.mode === "track" && TL.trackN > 1 && audioDur > 0) audioLoop = true;   // N lengths only mean anything if the track repeats
+  }
+  refreshLengthUI();
+  audioSeek(); audioFollow();
+  drawWave(); drawLane(); drawSparkline(); updateClock();
 }
-$("audLoopBtn").onclick = () => {
-  audioLoop = !audioLoop;
-  refreshAudioLoopUI();
-  audioSeek();
-  audioFollow();
-  drawSparkline();
+function lenLabel() {
+  const d = `${(P.dur ?? 0).toFixed(2)} s`;
+  if (TL.mode === "bars") return `${TL.bars} bar${TL.bars === 1 ? "" : "s"} · ${d}`;
+  if (TL.mode === "track") return `${TL.trackN}× track · ${d}`;
+  return d;
+}
+function refreshLengthUI() {
+  const has = audioDur > 0;
+  $("lenBtn").textContent = lenLabel() + (audioLoop && has ? " ⟲" : "") + " ▾";
+  for (const b of document.querySelectorAll("#lenMode button")) b.classList.toggle("on", b.dataset.mode === TL.mode);
+  for (const el of document.querySelectorAll(".lenpane")) el.classList.toggle("on", el.dataset.mode === TL.mode);
+  const keep = (id, v) => { if (document.activeElement !== $(id)) $(id).value = String(v); };
+  keep("trkN", TL.trackN); keep("bpm", TL.bpm); keep("barsN", TL.bars); keep("beatsN", TL.beats);
+  for (const id of ["trkN", "trkDec", "trkInc"]) $(id).disabled = !has;
+  $("trkInfo").textContent = has
+    ? `= ${(audioDur * TL.trackN).toFixed(2)} s  (${TL.trackN} × ${audioDur.toFixed(2)} s)`
+    : "Load audio first — this mode follows the track.";
+  $("barInfo").textContent = `= ${((TL.bars * TL.beats * 60) / TL.bpm).toFixed(2)} s · ${(60 / TL.bpm).toFixed(3)} s per beat`;
+  $("loopChk").checked = audioLoop;
+  $("loopChk").disabled = !has;
+}
+const refreshAudioLoopUI = refreshLengthUI;      // old name, still called from preset load and boot
+
+$("lenBtn").onclick = (e) => { e.stopPropagation(); $("lenPop").classList.toggle("hide"); refreshLengthUI(); };
+addEventListener("pointerdown", (e) => {
+  if ($("lenPop").classList.contains("hide")) return;
+  if (e.target.closest("#lenPop") || e.target.closest("#lenBtn")) return;
+  $("lenPop").classList.add("hide");
+});
+for (const b of document.querySelectorAll("#lenMode button")) {
+  b.onclick = () => {
+    if (b.dataset.mode === "track" && !(audioDur > 0)) { setStatus("Track × needs a loaded track — load audio first.", true); return; }
+    TL.mode = b.dataset.mode;
+    applyLength();
+  };
+}
+const numIn = (id, lo, hi, int) => { let v = parseFloat($(id).value); if (!Number.isFinite(v)) return null; v = clampNum(v, lo, hi); return int ? Math.round(v) : v; };
+$("trkN").onchange = () => { const v = numIn("trkN", 1, 64, true); if (v != null) { TL.trackN = v; applyLength(); } };
+$("trkDec").onclick = () => { TL.trackN = Math.max(1, TL.trackN - 1); applyLength(); };
+$("trkInc").onclick = () => { TL.trackN = Math.min(64, TL.trackN + 1); applyLength(); };
+$("bpm").onchange = () => { const v = numIn("bpm", 20, 300); if (v != null) { TL.bpm = v; applyLength(); } };
+$("barsN").onchange = () => { const v = numIn("barsN", 1, 256, true); if (v != null) { TL.bars = v; applyLength(); } };
+$("beatsN").onchange = () => { const v = numIn("beatsN", 1, 16, true); if (v != null) { TL.beats = v; applyLength(); } };
+$("barDec").onclick = () => { TL.bars = Math.max(1, TL.bars - 1); applyLength(); };
+$("barInc").onclick = () => { TL.bars = Math.min(256, TL.bars + 1); applyLength(); };
+$("loopChk").onchange = () => {
+  audioLoop = $("loopChk").checked;
+  refreshLengthUI(); audioSeek(); audioFollow(); drawSparkline(); drawWave();
 };
-$("audLoops").oninput = () => refreshAudioLoopUI();
-$("audFitDur").onclick = () => {
-  if (!audioDur) return;
-  const n = loopCount();
-  $("audLoops").value = String(n);          // reflect any clamp back into the field
-  const el = $("p-dur");
-  el.value = String(audioDur * n);
-  el.dispatchEvent(new Event("input", { bubbles: true }));
-  /* Fitting more than one length only means anything if the track repeats,
-     so arm Loop with it rather than leaving a silent tail behind. */
-  if (n > 1 && !audioLoop) audioLoop = true;
-  refreshAudioLoopUI();
-  audioSeek();
-  audioFollow();
-  drawSparkline();
-  setStatus(`Duration set to ${n} × track = ${(audioDur * n).toFixed(2)}s${audioLoop ? ", looping" : ""}.`);
+/* Tap tempo: the mean of the last four intervals; a pause over 2 s starts
+   a fresh count. Deliberately manual — tempo detection on field recordings
+   is unreliable, and a confidently wrong BPM is worse than none. */
+let taps = [];
+$("tapBtn").onclick = () => {
+  const now = performance.now();
+  if (taps.length && now - taps[taps.length - 1] > 2000) taps = [];
+  taps.push(now);
+  if (taps.length > 5) taps.shift();
+  if (taps.length >= 2) {
+    const iv = (taps[taps.length - 1] - taps[0]) / (taps.length - 1);
+    TL.bpm = Math.round((60000 / iv) * 10) / 10;
+    applyLength();
+  }
+  $("tapBtn").textContent = taps.length >= 4 ? "Tap ✓" : `Tap ${taps.length}`;
+};
+
+/* Beat/bar grid for the lane and scrub bar: [t, strong] pairs in 0..1. */
+function gridLines() {
+  if (TL.mode === "bars") {
+    const total = TL.bars * TL.beats;
+    if (total > 512) return Array.from({ length: TL.bars + 1 }, (_, i) => [i / TL.bars, true]);
+    return Array.from({ length: total + 1 }, (_, i) => [i / total, i % TL.beats === 0]);
+  }
+  if (TL.mode === "track" && TL.trackN > 1) {
+    return Array.from({ length: TL.trackN + 1 }, (_, i) => [i / TL.trackN, true]);
+  }
+  return [0, 0.25, 0.5, 0.75, 1].map((t) => [t, true]);
+}
+
+/* Peaks laid out on the timeline between x0 and x1 (canvas pixels). */
+function drawPeaks(ctx, x0, x1, H, step, colour, alpha) {
+  if (!wavePeaks || !(audioDur > 0) || !(P.dur > 0)) return;
+  ctx.fillStyle = colour;
+  ctx.globalAlpha = alpha;
+  const N = wavePeaks.length, mid = H / 2, amp = H * 0.44, span = Math.max(x1 - x0, 1);
+  for (let px = 0; px < span; px += step) {
+    const t = (px / span) * P.dur;
+    if (!audioLoop && t > audioDur) break;
+    const tt = audioLoop ? t % audioDur : t;
+    const v = wavePeaks[Math.min(N - 1, Math.floor((tt / audioDur) * N))];
+    const h = Math.max(step * 0.5, v * amp);
+    ctx.fillRect(x0 + px, mid - h, step, 2 * h);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* Waveform behind the scrub bar, laid out on the TIMELINE (so a looping
+   track repeats across it and a short one stops where it ends). */
+function drawWave() {
+  const cv = $("wave");
+  const sc = Math.min(devicePixelRatio || 1, 2);
+  const W = Math.max(1, Math.round(cv.clientWidth * sc)), H = Math.max(1, Math.round(cv.clientHeight * sc));
+  if (cv.width !== W) cv.width = W;
+  if (cv.height !== H) cv.height = H;
+  const ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, W, H);
+  const pad = 1 * sc;                       // the range thumb is 2px wide, so its centre travels 1px..W-1px
+  const x = (t) => pad + t * (W - 2 * pad);
+  drawPeaks(ctx, pad, W - pad, H, sc, CSSVAR("--ink-dim", "#737b86"), 0.38);
+  if (TL.mode === "bars" || (TL.mode === "track" && TL.trackN > 1)) {
+    ctx.fillStyle = CSSVAR("--edit", "#b48ce8");
+    for (const [t, strong] of gridLines()) {
+      ctx.globalAlpha = strong ? 0.55 : 0.2;
+      ctx.fillRect(Math.round(x(t)), strong ? 0 : H * 0.3, sc, strong ? H : H * 0.4);
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+addEventListener("resize", drawWave);
+
+/* ------------------------------------------------------------------ *
+ * Map mode — arm a band, click sliders. Replaces "focus a parameter, find
+ * the lane, pick a band, set depth" as the way IN; the lane and the
+ * Mappings list are where a mapping gets refined afterwards.
+ * ------------------------------------------------------------------ */
+function shapeName(a) {
+  for (const [k, p] of Object.entries(SHAPE_PRESETS)) {
+    if (Object.keys(p).every((f) => Math.abs((a[f] ?? 0) - p[f]) < 1e-9)) return k;
+  }
+  return "custom";
+}
+$("audShapePreset").onchange = () => {
+  if (!focused) return;
+  const v = $("audShapePreset").value;
+  if (SHAPE_PRESETS[v]) Object.assign(audOf(focused), SHAPE_PRESETS[v]);
+  laneHead(); pushUniforms(); refreshRoutes(true);
+};
+
+function setMapBand(b) {
+  mapBand = b && mapBand !== b ? b : null;
+  document.body.classList.toggle("mapping", !!mapBand);
+  document.body.dataset.mapband = mapBand || "";
+  for (const el of document.querySelectorAll("#mapChips button")) el.classList.toggle("on", el.dataset.band === mapBand);
+  if (mapBand) {
+    if (window.matchMedia("(max-width: 900px), (pointer: coarse)").matches && !document.body.classList.contains("panel-open")) $("panelToggle").click();
+    setStatus(`Mapping ${mapBand.toUpperCase()}: click any slider in the panel to drive it from ${mapBand}${audioEnv ? "" : " (load audio to see it move)"}. Click a mapped one again to unmap. Esc when done.`);
+  } else {
+    setStatus("Mapping finished.");
+  }
+}
+for (const el of document.querySelectorAll("#mapChips button")) el.onclick = () => setMapBand(el.dataset.band);
+
+/* Capture phase, so the slider under the pointer never sees the click and
+   never jumps to where you clicked. */
+function mapTargetOf(ev) {
+  if (!mapBand) return null;
+  const row = ev.target.closest?.(".row");
+  if (!row || !row.closest("#rail")) return null;
+  const inp = row.querySelector('input[type=range][id^="p-"]');
+  if (!inp || inp.disabled) return null;
+  const id = inp.id.slice(2);
+  return ANIM.includes(id) ? { id, row } : null;
+}
+$("rail").addEventListener("pointerdown", (ev) => {
+  const t = mapTargetOf(ev);
+  if (!t) return;
+  ev.preventDefault(); ev.stopPropagation();
+  const a = AUD[t.id];
+  const label = paramLabel(t.id);
+  if (a && a.band === mapBand && a.depth) {
+    setRoute(t.id, "");
+    setStatus(`${label}: unmapped. Still mapping ${mapBand.toUpperCase()} — Esc when done.`);
+  } else {
+    setRoute(t.id, mapBand, a?.band && a.depth ? a.depth : 0.3);
+    setStatus(`${label} ← ${mapBand}, depth ${AUD[t.id].depth.toFixed(2)}. Refine it in the lane or the Audio tab. Esc when done.`);
+  }
+  focusParam(t.id);
+  t.row.classList.remove("flash"); void t.row.offsetWidth; t.row.classList.add("flash");
+}, true);
+$("rail").addEventListener("click", (ev) => { if (mapTargetOf(ev)) { ev.preventDefault(); ev.stopPropagation(); } }, true);
+$("rail").addEventListener("input", (ev) => { if (mapBand && ev.target.id?.startsWith("p-")) ev.stopPropagation(); }, true);
+
+/* ------------------------------------------------------------------ *
+ * Mappings list — every active route in one place (Audio tab).
+ * Rebuilt only when the SET of routes changes, so dragging a depth slider
+ * inside it never has its row replaced under the pointer.
+ * ------------------------------------------------------------------ */
+function GROUP_NAME(g) { return document.querySelector(`.mod[data-group="${g}"] > summary`)?.firstChild?.textContent.trim() ?? g; }
+function paramGroupOf(id) { return SPEC.find(([sid]) => sid === id)?.[2]; }
+function routeTitle(id) {
+  const m = /^lt(I|R|Hue|Sat|X|Y|Z)(\d)$/.exec(id);
+  if (m) return `Light ${m[2]} ${paramLabel(id).toLowerCase()}`;
+  const r = /^rg(\d)/.exec(id);
+  if (r) return `Mask ${r[1]} ${paramLabel(id).toLowerCase()}`;
+  return paramLabel(id);
+}
+function refreshRoutes(force) {
+  const host = $("routeList");
+  if (!host) return;
+  const ids = ANIM.filter((id) => AUD[id]?.band && AUD[id]?.depth);
+  const sig = ids.map((id) => `${id}:${AUD[id].band}`).join(",");
+  if (!force && sig === routeSig) {
+    for (const id of ids) {
+      const row = host.querySelector(`.rrow[data-id="${id}"]`);
+      if (!row) continue;
+      const a = AUD[id], r = row.querySelector("input");
+      if (document.activeElement !== r) r.value = a.depth;
+      row.querySelector("output").textContent = (a.depth > 0 ? "+" : "") + a.depth.toFixed(2);
+      const sh = row.querySelector(".rshape");
+      if (document.activeElement !== sh) sh.value = shapeName(a);
+    }
+    return;
+  }
+  routeSig = sig;
+  host.replaceChildren();
+  for (const id of ids) {
+    const a = AUD[id];
+    const row = document.createElement("div");
+    row.className = "rrow";
+    row.dataset.id = id;
+    row.innerHTML =
+      `<button type="button" class="rname" title="Show this control"><span class="rtag" data-band="${a.band}">${a.band}</span>${routeTitle(id)} <em>${GROUP_NAME(paramGroupOf(id))}</em></button>` +
+      `<div class="rdepth"><input type="range" min="-1" max="1" step="0.01" value="${a.depth}" title="Depth — how far the band pushes this control, as a fraction of its range"><output></output></div>` +
+      `<select class="rshape" title="Smoothing">${Object.keys(SHAPE_PRESETS).map((k) => `<option value="${k}">${k}</option>`).join("")}<option value="custom">custom</option></select>` +
+      `<button type="button" class="rdel" title="Remove this mapping">&times;</button>`;
+    const out = row.querySelector("output");
+    out.textContent = (a.depth > 0 ? "+" : "") + a.depth.toFixed(2);
+    const sh = row.querySelector(".rshape");
+    sh.value = shapeName(a);
+    row.querySelector(".rname").onclick = () => { focusParam(id); revealParam(id); };
+    row.querySelector("input").oninput = (e) => {
+      a.depth = parseFloat(e.target.value);
+      if (a.depth === 0) a.depth = 0.001;      // 0 would silently delete the route
+      out.textContent = (a.depth > 0 ? "+" : "") + a.depth.toFixed(2);
+      if (focused === id) laneHead();
+      refreshKeyBtn(id);
+      pushUniforms(); syncSliders();
+    };
+    sh.onchange = () => {
+      if (SHAPE_PRESETS[sh.value]) Object.assign(a, SHAPE_PRESETS[sh.value]);
+      if (focused === id) laneHead();
+      pushUniforms(); syncSliders();
+    };
+    row.querySelector(".rdel").onclick = () => { setRoute(id, ""); refreshRoutes(true); };
+    host.appendChild(row);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Rail tabs — the 20 sections as five groups. Display only: every row
+ * keeps its id, so SPEC, presets, envelopes and routes are untouched.
+ * ------------------------------------------------------------------ */
+const TAB_KEY = "gausseous.tab.v1";
+function setTab(t) {
+  $("rail").dataset.tab = t;
+  for (const b of document.querySelectorAll("#tabs button")) {
+    const on = b.dataset.tab === t;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", String(on));
+  }
+  try { localStorage.setItem(TAB_KEY, t); } catch {}
+}
+for (const b of document.querySelectorAll("#tabs button")) b.onclick = () => setTab(b.dataset.tab);
+function refreshTabFlags() {
+  const agg = {};
+  for (const el of document.querySelectorAll(".mod[data-group][data-tab]")) {
+    const f = el.querySelector(".gflag");
+    const t = (agg[el.dataset.tab] ??= { driven: 0, dirty: false });
+    const n = parseInt(f?.textContent, 10);
+    if (Number.isFinite(n)) t.driven += n;
+    else if (f?.classList.contains("on")) t.dirty = true;
+  }
+  for (const b of document.querySelectorAll("#tabs button")) {
+    const a = agg[b.dataset.tab];
+    const fl = b.querySelector(".tflag");
+    fl.textContent = a?.driven ? String(a.driven) : a?.dirty ? "·" : "";
+  }
+}
+/* Bring a parameter's row into view: its tab, its section, any nested
+   disclosure, its mask slot. */
+function revealParam(id) {
+  const row = $("p-" + id)?.closest(".row");
+  if (!row) return;
+  const mod = row.closest(".mod");
+  if (mod) { setTab(mod.dataset.tab); mod.open = true; }
+  const sub = row.closest("details.ltsub");
+  if (sub) sub.open = true;
+  const rg = row.closest(".rgpanel");
+  if (rg) { rgSlot = Number(rg.dataset.slot); refreshRegionUI(); }
+  if (window.matchMedia("(max-width: 900px), (pointer: coarse)").matches && !document.body.classList.contains("panel-open")) $("panelToggle").click();
+  row.scrollIntoView({ block: "center", behavior: "smooth" });
+  row.classList.remove("flash"); void row.offsetWidth; row.classList.add("flash");
+}
+
+/* ------------------------------------------------------------------ *
+ * Starting looks — small, legible recipes that set a handful of controls
+ * and mappings, so a first session has something moving within a minute.
+ * Each one first resets the look/motion groups and their mappings, so a
+ * look means the same thing twice. Camera, transform, masks, film, frame,
+ * grain and length are never touched.
+ * ------------------------------------------------------------------ */
+const LOOK_GROUPS = ["points", "lights", "colour", "displace", "quantise", "wave", "smear"];
+const LOOKS = [
+  { id: "clean", name: "Clean", hint: "Resets Points, Lights, Colour and Motion, and their mappings." },
+  { id: "points", name: "Point cloud", hint: "Every splat a small dot; low band breathes the dot size.",
+    set: { ptIso: 1, ptSize: 0.55, ptJit: 0.35, splatOpacity: 0.5, blurAmount: 0.2 },
+    routes: { ptSize: ["low", 0.12, "punchy"] } },
+  { id: "lanterns", name: "Band lanterns", hint: "Capture darkened; low, mid and high each light one lantern.",
+    set: { ltAmt: 1, ltDark: 0.55, ltAdd: 0.7, ltI1: 0.15, ltI2: 0.15, ltI3: 0.15 },
+    routes: { ltI1: ["low", 0.45, "smooth"], ltI2: ["mid", 0.4, "punchy"], ltI3: ["high", 0.35, "punchy"] } },
+  { id: "kick", name: "Kick flash", hint: "A dark room; one wide lamp flashes on every hit.",
+    set: { ltAmt: 1, ltDark: 0.75, ltAdd: 1, ltEmit: 1.5, ltFall: 1.5, ltI1: 0, ltR1: 1.4, ltSat1: 0.15, ltHue1: 0.08,
+           ltX1: 0, ltY1: 0.5, ltZ1: 0.45, ltI2: 0, ltI3: 0 },
+    routes: { ltI1: ["hit", 0.6, "punchy"] } },
+  { id: "etched", name: "Etched", hint: "Points with shaded, rim-lit lights; mid band lifts the rim.",
+    set: { ptIso: 0.8, ptSize: 0.5, ptJit: 0.25, splatOpacity: 0.4, ltAmt: 1, ltDark: 0.6, ltAdd: 0.3,
+           ltNrm: 1, ltRim: 2, ltI1: 0.8, ltI2: 0.4, ltI3: 0.8 },
+    routes: { ltRim: ["mid", 0.2, "smooth"] } },
+  { id: "drift", name: "Drift", hint: "A slow curl-noise drift that swells with the mid band.",
+    set: { dAmt: 0.01, dFrq: 3, dSpd: 0.4, wAmt: 0.6 }, selects: { dField: "curl" },
+    routes: { dAmt: ["mid", 0.06, "swell"] } },
+];
+const LOOK_SELECT_DEFAULTS = { dField: "sin", dcMode: "off", qAxis: "off", wMode: "hash" };
+function applyLook(lookId) {
+  const L = LOOKS.find((l) => l.id === lookId);
+  if (!L) return;
+  const ids = SPEC.filter(([, , g]) => LOOK_GROUPS.includes(g)).map(([id]) => id).concat(["splatOpacity", "blurAmount"]);
+  for (const id of ids) {
+    setParam(id, parseFloat(DEFAULT[id]));
+    if (ENV[id]) { ENV[id].keys.length = 0; ENV[id].on = false; }
+    AUD[id] = { band: "", depth: 0, ...SHAPE_DEFAULT };
+  }
+  for (const [k, v] of Object.entries(LOOK_SELECT_DEFAULTS)) $(k).value = v;
+  for (const [k, v] of Object.entries(L.set ?? {})) setParam(k, v);
+  for (const [k, v] of Object.entries(L.selects ?? {})) $(k).value = v;
+  for (const [id, [band, depth, shape]] of Object.entries(L.routes ?? {})) {
+    Object.assign(audOf(id), { band, depth }, SHAPE_PRESETS[shape]);
+  }
+  pushUniforms(); syncSliders(); refreshKeyBtns(); laneHead(); drawLane(); refreshRoutes(true);
+  const needsAudio = Object.keys(L.routes ?? {}).length && !audioEnv;
+  setStatus(`${L.name}: ${L.hint}${needsAudio ? " Load audio to see it move." : ""}`);
+}
+{
+  const sel = $("lookSel");
+  for (const L of LOOKS) {
+    const o = document.createElement("option");
+    o.value = L.id; o.textContent = L.name; o.title = L.hint;
+    sel.appendChild(o);
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = L.name; b.title = L.hint;
+    b.onclick = () => applyLook(L.id);
+    $("scLooks").appendChild(b);
+  }
+  sel.onchange = () => { if (sel.value) applyLook(sel.value); sel.value = ""; };
+}
+
+/* ------------------------------------------------------------------ *
+ * Start card — the next two steps after a first load, then gets out of
+ * the way. Dismissal is remembered per browser.
+ * ------------------------------------------------------------------ */
+const START_KEY = "gausseous.start.v1";
+function showStartCard() {
+  let done = false;
+  try { done = localStorage.getItem(START_KEY) === "done"; } catch {}
+  if (done) return;
+  $("startCard").classList.remove("hide");
+  refreshStartCard();
+}
+function refreshStartCard() { $("scAudio").classList.toggle("done", audioDur > 0); }
+$("scClose").onclick = () => {
+  $("startCard").classList.add("hide");
+  try { localStorage.setItem(START_KEY, "done"); } catch {}
+};
+$("scLoadAud").onclick = () => $("audioFile").click();
+$("scTestAud").onclick = async () => {
+  try {
+    const r = await fetch("./bandtest.wav");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    await loadAudio(new File([await r.blob()], "bandtest.wav", { type: "audio/wav" }));
+  } catch (e) { setStatus("Test audio failed to load: " + e.message, true); }
 };
 
 /* ------------------------------------------------------------------ *
@@ -5963,14 +7331,28 @@ async function loadAudio(file) {
     audioEl.src = URL.createObjectURL(new Blob([forPreview], { type: file.type || "audio/*" }));
     audioEl.preload = "auto";
 
-    $("audName").textContent = `${audioName} — ${audioDur.toFixed(1)}s`;
+    $("audName").textContent = `${audioName} — ${audioDur.toFixed(1)}s · ${audioEnv.hit.hits} hits`;
+    $("audLoad").textContent = "\u266B " + audioName;
+    $("audLoad").title = `${audioName} — ${audioDur.toFixed(2)} s. Click to load a different track.`;
+    $("audLoad").classList.add("loaded");
     $("audMute").disabled = false;
     $("audClear").disabled = false;
+    /* A fresh timeline (still Seconds at its default) adopts the track: one
+       track length, looping. Anything the user has already set is left
+       alone, except Track x N, which by definition follows the track. */
+    let msg = `${audioName} analysed — ${audioDur.toFixed(1)}s, ${audioEnv.hit.hits} hits.`;
+    if (TL.mode === "seconds" && Math.abs(P.dur - parseFloat(DEFAULT.dur)) < 1e-6) {
+      TL.mode = "track"; TL.trackN = 1; audioLoop = true;
+      msg += " Timeline set to the track's length, looping.";
+    }
+    if (TL.mode === "track") applyLength();
     refreshAudioLoopUI();
     audioFollow();
-    setStatus(`${audioName} analysed — ${audioDur.toFixed(1)}s, 3 bands.`);
+    setStatus(msg);
     pushUniforms();
     audMeters();
+    drawWave();
+    refreshStartCard();
   } catch (err) {
     setStatus(`Audio analysis failed: ${err.message}`, true);
   }
@@ -6026,10 +7408,14 @@ $("audMute").onclick = () => {
 
 $("audClear").onclick = () => {
   if (audioEl) { audioEl.pause(); URL.revokeObjectURL(audioEl.src); audioEl = null; }
-  audioEnv = null; audioName = null; audioDur = 0; audioBuffer = null;
+  audioEnv = null; audioName = null; audioDur = 0; audioBuffer = null; wavePeaks = null;
   shapeCache.clear();
-  for (const band of Object.keys(BANDS)) audioLevel[band] = 0;
+  for (const band of SOURCES) audioLevel[band] = 0;
   $("audName").textContent = "no audio loaded";
+  $("audLoad").innerHTML = "&#9835; Load audio";
+  $("audLoad").classList.remove("loaded");
+  if (TL.mode === "track") TL.mode = "seconds";
+  drawWave();
   $("audMute").disabled = true;
   $("audClear").disabled = true;
   refreshAudioLoopUI();
@@ -6227,7 +7613,7 @@ if (DEBUG) {
 function currentMode() {
   if (correcting) return "correct";
   if (gestureOn) return "adjust";
-  if (pickOn) return pickTarget === "pivot" ? "pick-pivot" : "pick-focus";
+  if (pickOn) return pickTarget === "pivot" ? "pick-pivot" : pickTarget === "light" ? "pick-light" : "pick-focus";
   return "orbit";
 }
 function enterMode(m) {
@@ -6235,6 +7621,7 @@ function enterMode(m) {
     case "adjust": setGesture(true); break;
     case "pick-focus": setPickMode(true, "focus"); break;
     case "pick-pivot": setPickMode(true, "pivot"); break;
+    case "pick-light": setPickMode(true, "light"); break;
     /* "correct" is never a restore target: setGesture()/setPickMode() both
        refuse to turn on while correcting, so a hold can never leave Correct
        in the first place — currentMode() stays "correct" the whole time,
@@ -6318,9 +7705,11 @@ addEventListener("keydown", (e) => {
 
   if (code === "Escape") {
     e.preventDefault();
+    if (mapBand) { setMapBand(null); return; }
+    if (!$("lenPop").classList.contains("hide")) { $("lenPop").classList.add("hide"); return; }
     if (!$("kbdOverlay").classList.contains("hide")) { setKbdOverlay(false); return; }
     const m = currentMode();
-    if (m === "adjust" || m === "pick-focus" || m === "pick-pivot") {
+    if (m === "adjust" || m === "pick-focus" || m === "pick-pivot" || m === "pick-light") {
       enterMode("orbit");
       for (const c of Object.keys(holdOrigin)) delete holdOrigin[c];   // Esc overrides any pending hold-restore
       return;
@@ -6383,8 +7772,15 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) relea
  * Boot
  * ------------------------------------------------------------------ */
 initAccordion();
+{
+  let t = null;
+  try { t = localStorage.getItem(TAB_KEY); } catch {}
+  setTab(["scene", "look", "motion", "audio", "export"].includes(t) ? t : "look");
+}
 refreshGroups();
 refreshAudioLoopUI();
+refreshRoutes(true);
+drawWave();
 pushUniforms();
 updateClock();
 showDpr();
