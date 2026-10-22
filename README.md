@@ -36,14 +36,12 @@ python3 -c "import http.server; H=http.server.SimpleHTTPRequestHandler; _e=H.end
 ## First session
 
 1. Load a splat (drop it on the viewport, **Choose file**, or **Load test asset**).
-2. A **Next** card offers audio (**Test audio** loads `bandtest.wav`) and a
-   **starting look**. Loading audio sets the timeline to the track's length and
-   loops it.
+2. A **Next** card offers audio (**Test audio** loads `bandtest.wav`). Loading
+   audio sets the timeline to the track's length and loops it.
 3. Press **Play**. To make more things move with the sound, arm a band under
    **Map** in the transport bar and click any slider.
 
-Dismiss the card with ×; the same things live in the transport bar and the Look
-tab.
+Dismiss the card with ×; the same things live in the transport bar.
 
 ## Layout
 
@@ -57,7 +55,7 @@ tab.
 | Tab | Sections |
 |---|---|
 | **Scene** | Camera · Transform · Opacity · Masks |
-| **Look** | Starting look · Background · Points · Lights · Colour · Depth · Optics · Film · Frame · Grain |
+| **Look** | Background · Points · Lights · Colour · Depth · Optics · Film · Frame · Grain |
 | **Motion** | Noise · Fracture · Quantise · Wave · Smear |
 | **Audio** | Meters · Mappings |
 | **Export** | Output · Preset · Viewport |
@@ -176,11 +174,6 @@ over **Flash fade**). Hits are counted from the analysed track, so a held colour
 scrubs and exports exactly. **CRT** (in Frame) — scanlines counted per
 frame height, so exports match the preview at any resolution, plus a colour
 fringe that grows toward the edges.
-
-**Starting looks** (top of the Look tab, and the Next card): Clean, Point
-cloud, Band lanterns, Kick flash, Etched, Drift. Each resets the Points,
-Lights, Colour and Motion sections and their mappings, then sets a few
-controls and mappings. Camera, transform, masks, film and length are kept.
 
 **Adjust** binds up to two parameters to the drag axes so you can change them on
 the viewport itself, with the splat visible. Focus a parameter, bind X or Y in

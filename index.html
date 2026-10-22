@@ -591,12 +591,10 @@
   <div id="gestureHud" class="hide" aria-hidden="true" title="Tap a chip to unbind that axis"></div>
   <div id="ltMarks" aria-hidden="true"></div>
   <div id="startCard" class="hide" role="region" aria-label="Next steps">
-    <div class="sc-head"><span>Next</span><button type="button" id="scClose" title="Hide. Everything here also lives in the transport bar and the Look tab.">&times;</button></div>
+    <div class="sc-head"><span>Next</span><button type="button" id="scClose" title="Hide. Everything here also lives in the transport bar.">&times;</button></div>
     <div class="sc-step" id="scAudio"><b>1</b><div>Add audio <span class="sc-opt">optional — sets the timeline length</span>
       <div class="btns"><button type="button" id="scLoadAud">Load audio</button><button type="button" id="scTestAud">Test audio</button></div></div></div>
-    <div class="sc-step"><b>2</b><div>Pick a starting look
-      <div class="btns" id="scLooks"></div></div></div>
-    <div class="sc-step"><b>3</b><div>Map more: arm a band under <em>Map</em> in the transport bar, then click any slider.</div></div>
+    <div class="sc-step"><b>2</b><div>Map: arm a band under <em>Map</em> in the transport bar, then click any slider.</div></div>
   </div>
   <div id="drop">
     <h1>Gausseous</h1>
@@ -745,13 +743,6 @@
     <button type="button" role="tab" data-tab="audio" title="Audio analysis and every band-to-parameter mapping">Audio<i class="tflag"></i></button>
     <button type="button" role="tab" data-tab="export" title="Render settings, presets, viewport">Export<i class="tflag"></i></button>
   </nav>
-  <div class="tabintro" data-tab="look">
-    <div class="btns">
-      <select id="lookSel" title="Replaces the Points, Lights, Colour and Motion settings and their audio mappings. Camera, transform, framing, film and length are kept.">
-        <option value="">Starting look…</option>
-      </select>
-    </div>
-  </div>
 
   <details class="mod" data-group="camera" data-tab="scene" open>
     <summary>Camera <em>move</em><i class="gflag"></i></summary>
@@ -7786,70 +7777,7 @@ function revealParam(id) {
 }
 
 /* ------------------------------------------------------------------ *
- * Starting looks — small, legible recipes that set a handful of controls
- * and mappings, so a first session has something moving within a minute.
- * Each one first resets the look/motion groups and their mappings, so a
- * look means the same thing twice. Camera, transform, masks, film, frame,
- * grain and length are never touched.
- * ------------------------------------------------------------------ */
-const LOOK_GROUPS = ["points", "lights", "colour", "displace", "fracture", "quantise", "wave", "smear"];
-const LOOKS = [
-  { id: "clean", name: "Clean", hint: "Resets Points, Lights, Colour and Motion, and their mappings." },
-  { id: "points", name: "Point cloud", hint: "Every splat a small dot; low band breathes the dot size.",
-    set: { ptIso: 1, ptSize: 0.55, ptJit: 0.35, splatOpacity: 0.5, blurAmount: 0.2 },
-    routes: { ptSize: ["low", 0.12, "punchy"] } },
-  { id: "lanterns", name: "Band lanterns", hint: "Capture darkened; low, mid and high each light one lantern.",
-    set: { ltAmt: 1, ltDark: 0.55, ltAdd: 0.7, ltI1: 0.15, ltI2: 0.15, ltI3: 0.15 },
-    routes: { ltI1: ["low", 0.45, "smooth"], ltI2: ["mid", 0.4, "punchy"], ltI3: ["high", 0.35, "punchy"] } },
-  { id: "kick", name: "Kick flash", hint: "A dark room; one wide lamp flashes on every hit.",
-    set: { ltAmt: 1, ltDark: 0.75, ltAdd: 1, ltEmit: 1.5, ltFall: 1.5, ltI1: 0, ltR1: 1.4, ltSat1: 0.15, ltHue1: 0.08,
-           ltX1: 0, ltY1: 0.5, ltZ1: 0.45, ltI2: 0, ltI3: 0 },
-    routes: { ltI1: ["hit", 0.6, "punchy"] } },
-  { id: "etched", name: "Etched", hint: "Points with shaded, rim-lit lights; mid band lifts the rim.",
-    set: { ptIso: 0.8, ptSize: 0.5, ptJit: 0.25, splatOpacity: 0.4, ltAmt: 1, ltDark: 0.6, ltAdd: 0.3,
-           ltNrm: 1, ltRim: 2, ltI1: 0.8, ltI2: 0.4, ltI3: 0.8 },
-    routes: { ltRim: ["mid", 0.2, "smooth"] } },
-  { id: "drift", name: "Drift", hint: "A slow curl-noise drift that swells with the mid band.",
-    set: { dAmt: 0.01, dFrq: 3, dSpd: 0.4, wAmt: 0.6 }, selects: { dField: "curl" },
-    routes: { dAmt: ["mid", 0.06, "swell"] } },
-];
-const LOOK_SELECT_DEFAULTS = { dField: "sin", dcMode: "off", qAxis: "off", wMode: "hash",
-                               mshTopo: "knn", mshColor: "white", mshBlend: "add", mshGrow: "pivot" };
-function applyLook(lookId) {
-  const L = LOOKS.find((l) => l.id === lookId);
-  if (!L) return;
-  const ids = SPEC.filter(([, , g]) => LOOK_GROUPS.includes(g)).map(([id]) => id).concat(["splatOpacity", "blurAmount"]);
-  for (const id of ids) {
-    setParam(id, parseFloat(DEFAULT[id]));
-    if (ENV[id]) { ENV[id].keys.length = 0; ENV[id].on = false; }
-    AUD[id] = { band: "", depth: 0, ...SHAPE_DEFAULT };
-  }
-  for (const [k, v] of Object.entries(LOOK_SELECT_DEFAULTS)) $(k).value = v;
-  for (const [k, v] of Object.entries(L.set ?? {})) setParam(k, v);
-  for (const [k, v] of Object.entries(L.selects ?? {})) $(k).value = v;
-  for (const [id, [band, depth, shape]] of Object.entries(L.routes ?? {})) {
-    Object.assign(audOf(id), { band, depth }, SHAPE_PRESETS[shape]);
-  }
-  pushUniforms(); syncSliders(); refreshKeyBtns(); laneHead(); drawLane(); refreshRoutes(true);
-  const needsAudio = Object.keys(L.routes ?? {}).length && !audioEnv;
-  setStatus(`${L.name}: ${L.hint}${needsAudio ? " Load audio to see it move." : ""}`);
-}
-{
-  const sel = $("lookSel");
-  for (const L of LOOKS) {
-    const o = document.createElement("option");
-    o.value = L.id; o.textContent = L.name; o.title = L.hint;
-    sel.appendChild(o);
-    const b = document.createElement("button");
-    b.type = "button"; b.textContent = L.name; b.title = L.hint;
-    b.onclick = () => applyLook(L.id);
-    $("scLooks").appendChild(b);
-  }
-  sel.onchange = () => { if (sel.value) applyLook(sel.value); sel.value = ""; };
-}
-
-/* ------------------------------------------------------------------ *
- * Start card — the next two steps after a first load, then gets out of
+ * Start card — audio and mapping, the next steps after a first load, then gets out of
  * the way. Dismissal is remembered per browser.
  * ------------------------------------------------------------------ */
 const START_KEY = "gausseous.start.v1";
