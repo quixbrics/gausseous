@@ -81,6 +81,11 @@ the Loop / “× set” controls (Audio):
 envelope lookup and the exported audio alike. Camera Orbit turns and the light
 rig's Orbit both count per timeline loop, so whole numbers are seamless.
 
+Preview playback uses Web Audio: the decoded track loops sample-accurately and
+each timeline pass is scheduled on the audio clock ahead of time, so loops are
+gapless in the preview as well as the export. While audio is playing, the
+playhead follows the audio clock, so the picture cannot drift from the sound.
+
 ## Audio
 
 The file is analysed offline into band envelopes rather than sampled live, so

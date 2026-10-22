@@ -3549,7 +3549,6 @@ function refreshShapeToggle() {
 let audioName = null;
 let audioDur = 0;
 let audioEnv = null;                  // { low: Float32Array, mid, high }
-let audioEl = null;                   // <audio> for optional preview
 let audioBuffer = null;               // decoded PCM (AudioBuffer) — kept ONLY for export muxing, nothing playback-related reads it
 const audioLevel = { low: 0, mid: 0, high: 0, hit: 0 };
 
@@ -3813,7 +3812,7 @@ for (const [id, digits] of SPEC) {          // pass 2: listeners
     P[id] = parseFloat(e.target.value);
     $("o-" + id).textContent = readout(id, digits, P[id]);
     if (id === "dpr") { dpr = P.dpr; resize(); }
-    if (id === "dur") { updateClock(); refreshLengthUI(); drawWave(); }
+    if (id === "dur") { updateClock(); refreshLengthUI(); drawWave(); audioSeek(); }
     markDirty(id);
     /* Auto-key: an armed envelope owns its parameter, so a drag has to write
        into the curve or it would appear to do nothing. */
@@ -6478,16 +6477,10 @@ function frame(now) {
   const dt = Math.min((now - lastT) / 1000, 0.1);
   lastT = now;
   if (playing) {
-    const prev = playhead;
-    playhead = (playhead + dt / P.dur) % 1;
-    if (playhead < prev) {                   // looped
-      audioSeek();      // always resync position — needed when the clip is LONGER than the
-                         // timeline, where <audio> never reaches its own end and so was still
-                         // mid-playback, unpaused, drifting forward past the visual loop point
-      audioFollow();     // and restart it if the clip is SHORTER than the timeline: the browser
-                         // auto-pauses <audio> at its own end, and audioSeek() alone does not
-                         // resume playback, only audioFollow() does
-    }
+    /* With audio, the audio clock IS the transport (see monTick); without
+       it, the rAF clock as before. */
+    const heard = monTick();
+    playhead = heard != null ? heard : (playhead + dt / P.dur) % 1;
     $("scrub").value = playhead;
     pushUniforms();
     updateClock();
@@ -6755,6 +6748,7 @@ $("render").onclick = async () => {
   } finally {
     if (encoder && encoder.state !== "closed") encoder.close();
     rendering = false;
+    audioFollow();                          // resume monitoring if the transport is still running
     $("render").classList.remove("live");
     $("t-state").textContent = "idle";
     playhead = savedPlayhead;
@@ -7903,14 +7897,8 @@ async function loadAudio(file) {
   setStatus(`Analysing ${file.name}…`);
   try {
     const bytes = await file.arrayBuffer();
-    // decodeAudioData detaches the buffer, so keep a copy for the preview element
-    const forPreview = bytes.slice(0);
+    monStop();                         // the old track's sources, if playing
     await analyseAudio(bytes, file.name);
-
-    if (audioEl) { audioEl.pause(); URL.revokeObjectURL(audioEl.src); }
-    audioEl = new Audio();
-    audioEl.src = URL.createObjectURL(new Blob([forPreview], { type: file.type || "audio/*" }));
-    audioEl.preload = "auto";
 
     $("audName").textContent = `${audioName} — ${audioDur.toFixed(1)}s · ${audioEnv.hit.hits} hits`;
     $("audLoad").textContent = "\u266B " + audioName;
@@ -7941,44 +7929,127 @@ async function loadAudio(file) {
 
 $("audioFile").onchange = pick;
 
-/* Audio follows the transport. Playback is NOT what drives the parameters —
-   that is always the offline envelope — so an export still matches what you
-   heard even though nothing plays during a render. This is monitoring only.
-
-   Kept deliberately one-way: the transport drives the audio element, never
-   the reverse. Letting audio timeupdate drive `playhead` would make the
-   timeline jitter with the audio clock and fight scrubbing. */
+/* ------------------------------------------------------------------ *
+ * Monitoring playback — Web Audio, not an <audio> element.
+ *
+ * Playback is NOT what drives the parameters — that is always the offline
+ * envelope — so export matches regardless. But what you HEAR has to loop
+ * as tightly as the export does, and the <audio> element cannot: Chrome
+ * restarts its decoder at a loop point (an audible gap), and the timeline
+ * ran on the rAF clock, separately, with a 60 ms re-seek at every wrap
+ * whenever the two had drifted (an audible jump). Both are gone:
+ *
+ *  - The decoded AudioBuffer is played by AudioBufferSourceNodes, whose
+ *    `loop` is sample-accurate (loopEnd = the track's exact length).
+ *  - Each timeline pass is its own source, SCHEDULED on the audio clock
+ *    ahead of time (start at the pass's exact start, stop at its end), so
+ *    a timeline that is not a whole number of tracks (Bars, Seconds) also
+ *    restarts the track at the loop point without a gap.
+ *  - While playing, the playhead is READ from the audio clock (minus the
+ *    output latency, so the picture lines up with what is heard), so
+ *    visuals and sound cannot drift apart. Without audio, the rAF clock
+ *    drives it as before.
+ *
+ * Mute keeps the sources running at zero gain, so the clock stays put.
+ * ------------------------------------------------------------------ */
 let muted = false;
-
-function audioSeek() {
-  if (!audioEl || !audioDur) return;
-  const raw = playhead * P.dur;
-  const t = audioLoop
-    ? raw % audioDur                                     // wrap into the track
-    : Math.min(raw, Math.max(audioDur - 0.01, 0));
-  if (Math.abs(audioEl.currentTime - t) > 0.06) audioEl.currentTime = t;
+let audioCtx = null, monGain = null;
+const MON = { on: false, passStart: 0, srcs: [], nextPass: 0 };
+function ensureAudioCtx() {
+  if (!audioCtx) {
+    audioCtx = new AudioContext({ latencyHint: "interactive" });
+    monGain = audioCtx.createGain();
+    monGain.connect(audioCtx.destination);
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  monGain.gain.value = muted ? 0 : 1;
+  return audioCtx;
 }
-
-function audioFollow() {
-  if (!audioEl) return;
-  /* Looping, the element loops itself — the frame loop's audioSeek() only has
-     to correct drift, not restart playback at every wrap. */
-  audioEl.loop = audioLoop;
-  const want = playing && !muted && !rendering && (audioLoop || playhead * P.dur < audioDur);
-  if (want && audioEl.paused) {
-    audioSeek();
-    audioEl.play().catch((err) => {
-      /* Toggling the transport quickly supersedes an in-flight play() with a
-         pause(), which rejects as AbortError. That is the intended outcome,
-         not a failure — reporting it puts a red warning on the panel for
-         normal use. Only a genuine block (autoplay policy) is worth saying. */
-      if (err.name === "AbortError") return;
-      setStatus("Audio blocked: " + err.message, true);
-    });
-  } else if (!want && !audioEl.paused) {
-    audioEl.pause();
+const monLatency = () => (audioCtx ? (audioCtx.outputLatency || 0) + (audioCtx.baseLatency || 0) : 0);
+/* Track position for timeline second `s` — the same mapping sampleArr()
+   and the export use: wrap when looping, else play once and fall silent. */
+function trackPosAt(s) {
+  if (audioLoop && audioDur > 0) return ((s % audioDur) + audioDur) % audioDur;
+  return s;
+}
+/* One timeline pass: plays the track from `offset` (track seconds) at audio
+   time `when`, and stops at `until` (the pass's end). */
+function monSource(when, offset, until) {
+  if (!audioBuffer) return;
+  if (!audioLoop && offset >= audioBuffer.duration) return;   // silent remainder of the pass
+  const src = audioCtx.createBufferSource();
+  src.buffer = audioBuffer;
+  if (audioLoop) { src.loop = true; src.loopStart = 0; src.loopEnd = audioBuffer.duration; }
+  src.connect(monGain);
+  /* Late (a stalled tab or a long frame): join the pass where it already
+     is rather than starting it late and shifting everything after it. */
+  const now = audioCtx.currentTime;
+  if (when < now) {
+    offset = audioLoop ? trackPosAt(offset + (now - when)) : offset + (now - when);
+    if (!audioLoop && offset >= audioBuffer.duration) return;
+    when = now;
+  }
+  src.start(when, offset);
+  src.stop(until);
+  src.onended = () => { const i = MON.srcs.indexOf(src); if (i >= 0) MON.srcs.splice(i, 1); };
+  MON.srcs.push(src);
+}
+function monStop() {
+  clearInterval(MON.timer);
+  for (const s of MON.srcs) { try { s.onended = null; s.stop(); s.disconnect(); } catch {} }
+  MON.srcs.length = 0;
+  MON.on = false;
+}
+/* Start (or restart) from the current playhead. A short lead so the first
+   sample is scheduled, not late. */
+function monStart() {
+  monStop();
+  if (!audioBuffer || rendering) return;
+  const ctx = ensureAudioCtx();
+  const dur = Math.max(P.dur, 1e-3);
+  const lead = 0.04;
+  const at = ctx.currentTime + lead;
+  MON.passStart = at - playhead * dur;            // audio time of this pass's timeline 0
+  MON.nextPass = MON.passStart + dur;
+  monSource(at, trackPosAt(playhead * dur), MON.nextPass);
+  MON.on = true;
+  monSchedule();
+  /* Scheduling also runs off a timer, not only the frame loop: rAF stops
+     in a hidden tab and stalls on a long frame, and the next pass must
+     still be queued in time. 2 s of lookahead covers Chrome's 1 s
+     background-timer clamp. */
+  MON.timer = setInterval(monSchedule, 250);
+}
+function monSchedule() {
+  if (!MON.on || !audioCtx) return;
+  const dur = Math.max(P.dur, 1e-3);
+  while (MON.nextPass - audioCtx.currentTime < 2) {
+    monSource(MON.nextPass, 0, MON.nextPass + dur);
+    MON.nextPass += dur;
   }
 }
+/* Called every frame while playing: schedule the next pass ~0.5 s ahead,
+   and return the playhead as heard. */
+function monTick() {
+  if (!MON.on) return null;
+  const ctx = audioCtx, dur = Math.max(P.dur, 1e-3);
+  monSchedule();
+  const heard = ctx.currentTime - monLatency();
+  let el = heard - MON.passStart;
+  if (el < 0) return playhead;                    // the lead-in: hold where we started
+  while (el >= dur) { MON.passStart += dur; el -= dur; }
+  return el / dur;
+}
+/* Old names, same callers: audioFollow() starts or stops monitoring to
+   match the transport; audioSeek() re-syncs after a jump (scrub, key
+   click, length or loop change) — only if it is actually playing. */
+function audioFollow() {
+  const want = playing && !rendering && !!audioBuffer;
+  if (want && !MON.on) monStart();
+  else if (!want && MON.on) monStop();
+  if (monGain) monGain.gain.value = muted ? 0 : 1;
+}
+function audioSeek() { if (MON.on) monStart(); }
 
 $("audMute").onclick = () => {
   muted = !muted;
@@ -7988,7 +8059,7 @@ $("audMute").onclick = () => {
 };
 
 $("audClear").onclick = () => {
-  if (audioEl) { audioEl.pause(); URL.revokeObjectURL(audioEl.src); audioEl = null; }
+  monStop();
   audioEnv = null; audioName = null; audioDur = 0; audioBuffer = null; wavePeaks = null;
   shapeCache.clear();
   for (const band of SOURCES) audioLevel[band] = 0;
@@ -8055,7 +8126,9 @@ if (DEBUG) {
     get V()    { return V; },
     get P()    { return P; },
     get ENV()  { return ENV; },
-    get audio(){ return audioEl; },
+    get MON(){ return MON; },
+    get audioCtx(){ return audioCtx; },
+    monTick,
     get audioEnv(){ return audioEnv; },
     get AUD(){ return AUD; },
     get audioDur(){ return audioDur; },
