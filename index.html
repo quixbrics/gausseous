@@ -8048,8 +8048,114 @@ if (!CAN_EXPORT) {
  * on the tab being visible. Costs nothing when the flag is absent.
  * ------------------------------------------------------------------ */
 if (DEBUG) {
+  /* Camera regression harness — DEV_PLAN_CAMERA.md Phase 0. sampleCamLegacy
+     is sampleCam exactly as it stood at cfdff86, with its globals turned
+     into arguments. It lives here and nowhere else: it is the yardstick
+     every later camera phase is held to with its new options at their
+     defaults, never part of the app's own camera path. */
+  const _legacyCurves = new WeakMap();     // keys array -> [pos, tgt] curves, built once per fixture
+  const sampleCamLegacy = (keys, smooth, easeK, playheadT) => {
+    const easeL = (x, k) => (k <= 0 ? x : x * x * (3 - 2 * x) * k + x * (1 - k));
+    const n = keys.length;
+    if (n === 0) return null;
+    if (n === 1) return { pos: [...keys[0].pos], tgt: [...keys[0].tgt], fov: keys[0].fov };
+    if (n >= 3 && !_legacyCurves.has(keys)) {
+      _legacyCurves.set(keys, [
+        new THREE.CatmullRomCurve3(keys.map((k) => new THREE.Vector3(...k.pos))),
+        new THREE.CatmullRomCurve3(keys.map((k) => new THREE.Vector3(...k.tgt))),
+      ]);
+    }
+    const [posCurve, tgtCurve] = _legacyCurves.get(keys) ?? [null, null];
+
+    let i = 0;
+    while (i < n - 2 && keys[i + 1].t <= playheadT) i++;
+    const a = keys[i], b = keys[i + 1];
+    const span = Math.max(b.t - a.t, 1e-9);
+    const localRaw = Math.min(1, Math.max(0, (playheadT - a.t) / span));
+    const localU = easeL(localRaw, easeK);
+    const fov = a.fov + (b.fov - a.fov) * localU;
+
+    if (smooth && n >= 3 && posCurve) {
+      const curveU = (i + localU) / (n - 1);
+      return { pos: posCurve.getPoint(curveU).toArray(), tgt: tgtCurve.getPoint(curveU).toArray(), fov };
+    }
+    const lerp3 = (p, q, u) => [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u, p[2] + (q[2] - p[2]) * u];
+    return { pos: lerp3(a.pos, b.pos, localU), tgt: lerp3(a.tgt, b.tgt, localU), fov };
+  };
+
+  /* Four fixture key sets. Fresh objects per call, so a check that mutates
+     a key (a curve, a retime) can never leak into the next one. */
+  const camFixtures = () => {
+    const k = (t, pos, tgt, fov = 50) => ({ t, pos, tgt, fov });
+    const circ = (deg, r = 5, y = 1) => [Math.cos(deg * Math.PI / 180) * r, y, Math.sin(deg * Math.PI / 180) * r];
+    return {
+      two: [k(0.1, [0, 0, 5], [0, 0, 0], 50), k(0.9, [3, 1, 4], [0.5, 0, 0], 40)],
+      three: [k(0, [0, 0, 5], [0, 0, 0], 50), k(0.5, [4, 1, 2], [0, 0.5, 0], 45), k(1, [1, 2, -4], [0.3, 0, 0], 55)],
+      uneven: [
+        k(0, [0, 0, 6], [0, 0, 0], 50), k(0.2, [3, 1, 5], [0.2, 0, 0], 48),
+        k(0.22, [3.4, 1.1, 4.6], [0.25, 0, 0], 47), k(0.62, [5, -1, -2], [0, 0.4, 0], 60),
+        k(0.8, [1, 2, -5], [-0.3, 0.2, 0], 52), k(1, [-4, 0.5, -3], [0, 0, 0.3], 50),
+      ],
+      circle: [0, 60, 120, 180, 240, 300].map((d, i) => k(i / 5, circ(d), [0, 1, 0], 50)),
+    };
+  };
+
+  /* Runs fn with the live camera globals swapped for a fixture, and puts
+     every one of them back afterwards, whatever fn does. sampleCam reads
+     globals by design (it is the app's real sampler), so this swap is how
+     the harness exercises it without touching its code path. */
+  const camWith = (keys, { smooth = true, ease: easeK = 0.8 } = {}, fn) => {
+    const saved = { keys: CAMKEYS, smooth: camSmooth, ease: V.ease };
+    try {
+      CAMKEYS = keys; camSmooth = smooth; V.ease = easeK;
+      rebuildCamCurves();
+      return fn();
+    } finally {
+      CAMKEYS = saved.keys; camSmooth = saved.smooth; V.ease = saved.ease;
+      rebuildCamCurves();
+    }
+  };
+
+  /* Sample times: 400 even steps, plus every key t and t ± 1e-4. */
+  const camSampleTs = (keys) => {
+    const ts = [];
+    for (let s = 0; s <= 400; s++) ts.push(s / 400);
+    for (const k of keys) ts.push(k.t, k.t - 1e-4, k.t + 1e-4);
+    return ts.filter((t) => t >= 0 && t <= 1);
+  };
+  const camDiff = (p, q) => ({
+    pos: Math.max(...p.pos.map((v, j) => Math.abs(v - q.pos[j]))),
+    tgt: Math.max(...p.tgt.map((v, j) => Math.abs(v - q.tgt[j]))),
+    fov: Math.abs(p.fov - q.fov),
+  });
+
+  /* Gate 0: the live sampler against the legacy one, every fixture x shape
+     x ease. Returns the worst absolute difference per channel overall and
+     per fixture; all zero means default behaviour is untouched. */
+  const camCheck = () => {
+    const fx = camFixtures();
+    const worst = { pos: 0, tgt: 0, fov: 0 }, byFixture = {};
+    for (const [name, keys] of Object.entries(fx)) {
+      const w = { pos: 0, tgt: 0, fov: 0 };
+      for (const smooth of [true, false]) {
+        for (const easeK of [0, 0.5, 0.8, 1]) {
+          camWith(keys, { smooth, ease: easeK }, () => {
+            for (const t of camSampleTs(keys)) {
+              const d = camDiff(sampleCam(t), sampleCamLegacy(keys, smooth, easeK, t));
+              for (const c of ["pos", "tgt", "fov"]) w[c] = Math.max(w[c], d[c]);
+            }
+          });
+        }
+      }
+      byFixture[name] = w;
+      for (const c of ["pos", "tgt", "fov"]) worst[c] = Math.max(worst[c], w[c]);
+    }
+    return { ...worst, pass: worst.pos <= 1e-12 && worst.tgt <= 1e-12 && worst.fov <= 1e-12, byFixture };
+  };
+
   window.__bench = {
     renderer, scene, camera, controls, spark,
+    camCheck, sampleCamLegacy, camFixtures, camWith, camSampleTs, camDiff,
     get mesh() { return mesh; },
     get V()    { return V; },
     get P()    { return P; },
