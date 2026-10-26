@@ -190,11 +190,30 @@ at the playhead and focus it in the curve lane; drag keys in the lane, or drag
 the slider itself to auto-key. Armed sliders become live readouts of their
 curve. Exports honour envelopes.
 
+**Camera keys** (Scene → Camera, Keyframes) are a separate row of diamond
+ticks above the lane: **Add key** stores the current view at the playhead, and
+ticks drag to retime. Between keys:
+
+- **Smooth / Linear** sets the path shape.
+- **Ease / Flow** sets the timing. *Ease* settles at every key, by the
+  **Ease** slider. *Flow* keeps the camera's speed through keys, so a
+  multi-key move plays as one glide.
+- **Arrival** shapes how the camera lands on the key at the playhead. Use
+  `◀ key` / `key ▶` to step between keys, drag the two handles, or pick
+  Smooth, Fast, Linear, Ease in or Ease out. **Auto** goes back to the path's
+  timing. Shaped keys show a ring on their tick. A shaped key is still a
+  landing in Flow, and the camera eases into and out of it.
+- **Snap** (Hits, Beats, Both) pulls a dragged tick onto the nearest audio
+  hit or beat within 8 px. Hold Shift to place it freely. Hits show as faint
+  marks on the row. Beats need Length in Bars mode. `Alt + ,` / `Alt + .`
+  (⌥ on a Mac) jump the playhead to the previous / next hit, for "go to the
+  hit, Add key". Snap is remembered in the browser, not saved in presets.
+
 **Save JSON** writes the whole editable state — parameters, envelopes, toggles,
 camera keys, gesture bindings, audio mappings, timeline length — as a small
 text file. The splat and the audio are referenced by name only, not embedded,
 so load your capture first and then the preset. Drop a `.json` on the viewport
-to load it. Preset format v10; older presets still load, with any features they predate (Points, Lights, Mesh, Fracture, CRT, background hue) reset.
+to load it. Preset format v11; older presets still load, with any features they predate (Points, Lights, Mesh, Fracture, CRT, background hue, camera arrival curves and Flow timing) reset.
 
 Keep the tab visible while exporting — Chrome throttles background timers to
 ~1s, which slows the render to roughly a frame per second.

@@ -98,8 +98,14 @@ hand.
   scrubbing, playback, and export all agree exactly on what the audio
   was doing at any timeline position. Any parameter can be routed to a
   band with its own attack/release/gain shaping.
-- **Camera**: manual orbit, a keyframed path (Catmull-Rom interpolation
-  between camera poses), or a generated turntable orbit.
+- **Camera**: manual orbit, a keyframed path, or a generated turntable
+  orbit. The keyframed path is Catmull-Rom between camera poses, eased per
+  segment ("Ease" timing), or one cubic Hermite per segment with
+  time-scaled, chord-capped tangents so speed carries through keys ("Flow").
+  Each key can carry a cubic-Bézier arrival curve that retimes the segment
+  landing on it. Key ticks can snap to the offline-analysed audio hits or to
+  the bar grid. Sampling is a pure function of the timeline position, so
+  scrub, playback and export agree.
 
 - **Audio sources**: three filtered bands plus an onset (`hit`) pulse
   derived offline from them. Mappings are made by arming a band and
