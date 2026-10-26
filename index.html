@@ -137,6 +137,10 @@
     pointer-events:none;
   }
   #camRowHint.hide{display:none}
+  /* Hit marks behind the ticks while Snap includes Hits — one canvas, not a
+     div per hit, and never given the camtick class drawCamRow() clears. */
+  #camHitMarks{position:absolute; inset:0; width:100%; height:100%; pointer-events:none}
+  #camSnapLbl{display:flex; align-items:center; gap:6px; margin-left:auto; color:var(--ink-dim)}
   .camtick{
     position:absolute; top:3px; width:10px; height:10px; margin-left:-5px;
     background:var(--edit); cursor:ew-resize; transform:rotate(45deg);
@@ -696,6 +700,7 @@
     </div>
   </div>
   <div id="camRow" title="Camera keyframes — click a tick to jump there, alt-click to delete">
+    <canvas id="camHitMarks"></canvas>
     <div id="camRowHint">no camera keyframes</div>
   </div>
   <div id="laneWrap">
@@ -790,6 +795,14 @@
     <div class="btns" style="margin:0 0 9px" id="camTimingBtns">
       <button type="button" data-timing="ease" class="on" title="Timing: each segment eases on its own, so the camera settles at every key">Ease</button>
       <button type="button" data-timing="flow" title="Timing: the camera keeps its speed through keys. Keys with their own arrival curve still land on that curve">Flow</button>
+      <label id="camSnapLbl" title="Snap dragged camera ticks to audio hits and/or the bar grid. Hold Shift while dragging to place freely. Editing aid only — not saved in presets.">Snap
+        <select id="camSnap">
+          <option value="off" selected>Off</option>
+          <option value="hits">Hits</option>
+          <option value="beats">Beats</option>
+          <option value="both">Both</option>
+        </select>
+      </label>
     </div>
     <p style="color:var(--ink-dim); margin:8px 0" id="camKeyCount">
       <span id="camKeyCountText">No camera keyframes — camera stays under manual orbit control.</span>
@@ -1434,6 +1447,7 @@
       <tr><td>Space</td><td>play / pause</td></tr>
       <tr><td>, .</td><td>step one frame back / forward</td></tr>
       <tr><td>Shift + , .</td><td>jump to previous / next camera keyframe</td></tr>
+      <tr><td>Alt (⌥) + , .</td><td>jump to previous / next audio hit</td></tr>
       <tr><td>Home / End</td><td>playhead to start / end</td></tr>
       <tr><td>[ ]</td><td>focus offset down / up, one small step</td></tr>
       <tr><td>1 – 6</td><td>select region slot</td></tr>
@@ -6584,6 +6598,7 @@ function drawCamRow() {
     row.appendChild(el);
   }
   refreshArrival();
+  refreshSnap();
 }
 
 /* Arrival editor — DEV_PLAN_CAMERA.md Phase 1. The key it edits is the key
@@ -6718,6 +6733,117 @@ function setKeyCurve(key, curve) {
   $("p-ease").addEventListener("input", () => refreshArrival());
 }
 
+/* Snapping — DEV_PLAN_CAMERA.md Phase 3. An editing aid, not content: the
+   choice lives in localStorage, never in presets.
+
+   Targets are in normalised t and rebuilt lazily whenever anything they
+   depend on changes (the hit list itself, Loop, the track length, the clip
+   length, the bar grid). That signature check replaces hooking every place
+   those can change: audio load, the Loop box, Length's three modes, preset
+   load. Hits are the raw analysed onset times, repeated every audioDur when
+   Loop is on, exactly the rule hitCountAt() uses, so a key snapped to a hit
+   lines up with background-on-hits. Per-band lag is deliberately ignored,
+   as hitCountAt() ignores it. */
+const SNAP_KEY = "gausseous.camSnap";
+let camSnap = "off";                  // "off" | "hits" | "beats" | "both"
+try { const v = localStorage.getItem(SNAP_KEY); if (["off", "hits", "beats", "both"].includes(v)) camSnap = v; } catch {}
+let snapCache = { ht: null, sig: "", hits: [], beats: [] };
+let snapMarksSig = "";
+
+function snapTargets() {
+  const ht = audioEnv?.hit?.hitTimes ?? null;
+  const sig = `${audioLoop}|${audioDur}|${P.dur}|${TL.mode}|${TL.bars}|${TL.beats}`;
+  if (ht === snapCache.ht && sig === snapCache.sig) return snapCache;
+  const hits = [], beats = [];
+  if (ht && ht.length && audioDur > 0 && P.dur > 0) {
+    const passes = audioLoop ? Math.ceil(P.dur / audioDur) : 1;
+    for (let p = 0; p < passes; p++) {
+      for (const sec of ht) {
+        const at = p * audioDur + sec;
+        if (at > P.dur + 1e-9) break;
+        hits.push(at / P.dur);
+      }
+    }
+  }
+  if (TL.mode === "bars") {
+    const n = TL.bars * TL.beats;
+    for (let i = 0; i <= n; i++) beats.push(i / n);
+  }
+  snapCache = { ht, sig, hits, beats };
+  return snapCache;
+}
+
+/* The target list the current Snap mode uses. Beats exist only in Bars
+   length mode (the only one with a grid); outside it Beats has nothing to
+   snap to and Both behaves as Hits. */
+function activeSnapList() {
+  const { hits, beats } = snapTargets();
+  if (camSnap === "hits") return hits;
+  if (camSnap === "beats") return beats;
+  if (camSnap === "both") return [...hits, ...beats].sort((x, y) => x - y);
+  return [];
+}
+
+/* Nearest target to t within tol that also stays inside [lo, hi] (the
+   drag's neighbour clamp), else t unchanged. */
+function snapT(t, tol, lo, hi) {
+  let best = t, bestD = tol;
+  for (const x of activeSnapList()) {
+    if (x < lo || x > hi) continue;
+    const d = Math.abs(x - t);
+    if (d <= bestD) { best = x; bestD = d; }
+  }
+  return best;
+}
+
+/* Keeps the Snap control and the hit marks in step with the targets. Runs
+   from drawCamRow() (so every playback frame), on resize and on a Snap
+   change, and redraws only when its signature changes. */
+function refreshSnap() {
+  const sel = $("camSnap");
+  const bars = TL.mode === "bars";
+  for (const o of sel.options) {
+    if (o.value === "beats" || o.value === "both") {
+      o.disabled = !bars;
+      o.title = bars ? "" : "Beats needs Length in Bars mode: it is the only mode with a bar grid.";
+    }
+  }
+  if (sel.value !== camSnap) sel.value = camSnap;
+
+  const cv = $("camHitMarks"), row = $("camRow");
+  const { hits, sig } = snapTargets();
+  const w = row.clientWidth || 0, h = row.clientHeight || 0, dpr = window.devicePixelRatio || 1;
+  const show = camSnap === "hits" || camSnap === "both";
+  const msig = `${show}|${hits.length}|${snapCache.ht ? "h" : "-"}|${sig}|${w}|${h}|${dpr}`;
+  if (msig === snapMarksSig) return;
+  snapMarksSig = msig;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const g = cv.getContext("2d");
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, cv.width, cv.height);
+  if (!show || !w || hits.length > 600) return;   // too dense to read; snapping still works
+  g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--b-hit").trim() || "#ff6fc8";
+  g.globalAlpha = 0.35;
+  const lw = Math.max(1, Math.round(dpr));
+  for (const x of hits) g.fillRect(Math.round(x * w * dpr), 0, lw, cv.height);
+}
+
+/* Playhead to the previous / next hit (Alt + , / .), for "go to the hit, Add
+   key". Uses the hit list whatever Snap is set to. */
+function jumpHit(dir) {
+  const { hits } = snapTargets();
+  if (!hits.length) { setStatus("No audio hits to jump to — load audio first.", true); return; }
+  const eps = 1e-6;
+  const next = dir > 0 ? hits.find((t) => t > playhead + eps) : [...hits].reverse().find((t) => t < playhead - eps);
+  if (next !== undefined) setPlayhead(next);
+}
+
+$("camSnap").onchange = () => {
+  camSnap = $("camSnap").value;
+  try { localStorage.setItem(SNAP_KEY, camSnap); } catch {}
+  refreshSnap();
+};
+
 /* Camera key drag — retimes in place. Deliberately does NOT call
    rebuildCamCurves() on every pointermove: that rebuilds two
    CatmullRomCurve3 instances from scratch, which is the obvious regression
@@ -6735,7 +6861,9 @@ addEventListener("pointermove", (ev) => {
   const dx = ev.clientX - camKeyDrag.startX;
   if (Math.abs(dx) > 3) camKeyDrag.moved = true;
   if (!camKeyDrag.moved) return;
-  const t = clamp(camKeyDrag.startT + dx / Math.max(camKeyDrag.w, 1), camKeyDrag.lo, camKeyDrag.hi);
+  let t = clamp(camKeyDrag.startT + dx / Math.max(camKeyDrag.w, 1), camKeyDrag.lo, camKeyDrag.hi);
+  /* Snap within 8 px, still inside the neighbour clamp; Shift places freely. */
+  if (camSnap !== "off" && !ev.shiftKey) t = snapT(t, 8 / Math.max(camKeyDrag.w, 1), camKeyDrag.lo, camKeyDrag.hi);
   camKeyDrag.key.t = t;
   camKeyDrag.el.style.left = (t * camKeyDrag.w) + "px";
   camKeyDrag.el.title = `t=${t.toFixed(2)} — drag to retime, click to jump, alt-click to delete`;
@@ -8588,6 +8716,10 @@ if (DEBUG) {
     get camSmooth(){ return camSmooth; },
     get camTiming(){ return camTiming; },
     get camFlow(){ return camFlow; },
+    get camSnap(){ return camSnap; },
+    snapTargets, activeSnapList, jumpHit, refreshSnap,
+    get TL(){ return TL; },
+    get audioLoop(){ return audioLoop; },
     sampleCam,
     sampleOrbit,
     evaluateCamera,
@@ -8783,6 +8915,14 @@ const NAV_KEYS = new Set([
    hold bindings. */
 addEventListener("keydown", (e) => {
   if (isEditableTarget(document.activeElement)) return;   // typing in a field triggers nothing
+  /* Alt + , / . — playhead to previous / next audio hit. The one Alt binding,
+     so it sits above the modifier bail below. Matched on e.code: on macOS ⌥
+     changes e.key (⌥ , types "≤"). */
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.code === "Comma" || e.code === "Period")) {
+    e.preventDefault();
+    jumpHit(e.code === "Period" ? 1 : -1);
+    return;
+  }
   if (e.ctrlKey || e.metaKey || e.altKey) return;          // Cmd/Ctrl+A still selects text
 
   const code = e.code;
