@@ -143,6 +143,18 @@
     border:1px solid var(--chassis); touch-action:none;
   }
   .camtick.onkey{background:var(--live)}
+  /* A key with its own arrival curve: a ring inside the diamond, so shaped
+     keys read on the row without competing with the playhead highlight. */
+  .camtick.curved{box-shadow:inset 0 0 0 2px var(--signal)}
+  #camArrival .arrBody{display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap}
+  #camArrCanvas{
+    width:200px; height:112px; flex:0 0 auto;
+    background:var(--void); border:1px solid var(--rule); touch-action:none; cursor:crosshair;
+  }
+  #camArrPresets{flex-direction:column; flex:1 1 80px; min-width:80px}
+  #camArrPresets button{text-align:left}
+  #camArrival.off #camArrCanvas{opacity:.35; pointer-events:none}
+  #camArrHint{color:var(--ink-dim); margin:6px 0 0; min-height:1.2em}
   #laneWrap{position:relative; flex:1; min-height:0}
   #laneCanvas{width:100%; height:100%; cursor:crosshair; touch-action:none}
   #laneHint{
@@ -773,6 +785,25 @@
       <span id="camKeyCountText">No camera keyframes — camera stays under manual orbit control.</span>
       <span id="camDirty" title="Orbit has moved the camera away from what the curve shows here — Add key to keep it, or scrub to discard it">· off curve</span>
     </p>
+
+    <div id="camArrival">
+      <div class="btns" style="margin-bottom:6px">
+        <button type="button" id="camKeyPrev" title="Playhead to the previous camera keyframe (Shift + ,)">◀ key</button>
+        <button type="button" id="camKeyNext" title="Playhead to the next camera keyframe (Shift + .)">key ▶</button>
+      </div>
+      <div class="arrBody">
+        <canvas id="camArrCanvas" title="How the camera arrives at the key at the playhead — drag the two handles"></canvas>
+        <div class="btns" id="camArrPresets">
+          <button type="button" data-curve="smooth" title="Arrival curve: slow out, slow in">Smooth</button>
+          <button type="button" data-curve="fast" title="Arrival curve: quick, then a long settle onto the key">Fast</button>
+          <button type="button" data-curve="linear" title="Arrival curve: constant speed, no easing">Linear</button>
+          <button type="button" data-curve="easeIn" title="Arrival curve: starts slow, arrives moving">Ease in</button>
+          <button type="button" data-curve="easeOut" title="Arrival curve: leaves moving, settles slowly">Ease out</button>
+          <button type="button" id="camArrAuto" title="Back to the Ease slider for this key">Auto</button>
+        </div>
+      </div>
+      <p id="camArrHint"></p>
+    </div>
 
     <div id="camOrbitRows">
       <div class="btns" style="margin:9px 0">
@@ -4985,8 +5016,40 @@ addEventListener("drop", async (e) => {
 let CAMKEYS = [];
 let camSmooth = true;                 // path shape: curved vs straight segments
 let camPosCurve = null, camTgtCurve = null;   // THREE.CatmullRomCurve3, rebuilt on any mutation
+let camArrSig = "";                   // last-drawn state of the Arrival editor — redraw only when it changes
+let camArrDrag = null;                // { key, h } while a handle is dragged; h = 0 | 1
 
 const ease = (x, k) => (k <= 0 ? x : x * x * (3 - 2 * x) * k + x * (1 - k));
+
+/* Per-key arrival curves — DEV_PLAN_CAMERA.md Phase 1. A key's `curve` is a
+   cubic Bézier [x1, y1, x2, y2] from (0,0) to (1,1) that shapes the segment
+   ARRIVING at that key (previous key -> this one); null means Auto, which is
+   today's ease(localRaw, V.ease). Arrival rather than departure because the
+   musical point of a key is where the camera lands. Maths ported from GS_Bed
+   (core/camera/planner.js): x solved by 40-step bisection, and with every
+   coordinate held to 0..1 the curve cannot overshoot its end key. */
+function bezier([x1, y1, x2, y2], u) {
+  if (u <= 0) return 0;
+  if (u >= 1) return 1;
+  const bx = (t) => 3 * (1 - t) * (1 - t) * t * x1 + 3 * (1 - t) * t * t * x2 + t * t * t;
+  const by = (t) => 3 * (1 - t) * (1 - t) * t * y1 + 3 * (1 - t) * t * t * y2 + t * t * t;
+  let lo = 0, hi = 1, t = u;
+  for (let i = 0; i < 40; i++) { t = (lo + hi) / 2; if (bx(t) < u) lo = t; else hi = t; }
+  return by(t);
+}
+const CAM_CURVES = {
+  smooth: [0.65, 0, 0.35, 1],
+  fast: [0.2, 0, 0.08, 1],          // quick, then a long settle with no overshoot
+  linear: [0.25, 0.25, 0.75, 0.75],
+  easeIn: [0.6, 0, 0.9, 0.6],
+  easeOut: [0.1, 0.4, 0.4, 1],
+};
+/* The one gate every stored curve passes through (editor, preset load):
+   four finite numbers, each clamped to 0..1, else null (Auto). */
+const cleanCurve = (c) =>
+  Array.isArray(c) && c.length === 4 && c.every((v) => typeof v === "number" && Number.isFinite(v))
+    ? c.map((v) => clampNum(v, 0, 1))
+    : null;
 
 function rebuildCamCurves() {
   if (CAMKEYS.length < 3) { camPosCurve = camTgtCurve = null; return; }
@@ -4997,8 +5060,9 @@ function rebuildCamCurves() {
 const camKeyIndexAt = (t) => CAMKEYS.findIndex((k) => Math.abs(k.t - t) < KEY_EPS);
 
 function addCamKey() {
-  const rec = { t: playhead, pos: camera.position.toArray(), tgt: controls.target.toArray(), fov: camera.fov };
+  const rec = { t: playhead, pos: camera.position.toArray(), tgt: controls.target.toArray(), fov: camera.fov, curve: null };
   const i = camKeyIndexAt(playhead);
+  if (i >= 0) rec.curve = CAMKEYS[i].curve ?? null;   // re-adding updates the pose; the arrival curve stays
   if (i >= 0) CAMKEYS[i] = rec; else CAMKEYS.push(rec);
   CAMKEYS.sort((a, b) => a.t - b.t);
   rebuildCamCurves();
@@ -5031,7 +5095,7 @@ function sampleCam(playheadT) {
   const a = CAMKEYS[i], b = CAMKEYS[i + 1];
   const span = Math.max(b.t - a.t, 1e-9);
   const localRaw = Math.min(1, Math.max(0, (playheadT - a.t) / span));
-  const localU = ease(localRaw, V.ease);
+  const localU = b.curve ? bezier(b.curve, localRaw) : ease(localRaw, V.ease);   // b's arrival curve, else Auto
   const fov = a.fov + (b.fov - a.fov) * localU;
 
   if (camSmooth && n >= 3 && camPosCurve) {
@@ -6348,6 +6412,7 @@ function setCamMode(mode) {
   $("camKeyBtns").style.display = mode === "manual" ? "none" : "";
   $("camKeyCount").style.display = mode === "keyframes" ? "" : "none";
   $("camRow").style.display = mode === "keyframes" ? "" : "none";
+  $("camArrival").style.display = mode === "keyframes" ? "" : "none";
   $("camOrbitRows").style.display = mode === "orbit" ? "" : "none";
   driveCamera();            // force-write: switching mode should snap to the curve immediately, not wait for a scrub
   pushUniforms();
@@ -6370,7 +6435,7 @@ function drawCamRow() {
   const w = row.clientWidth || 1;
   for (const k of CAMKEYS) {
     const el = document.createElement("div");
-    el.className = "camtick" + (Math.abs(k.t - playhead) < KEY_EPS ? " onkey" : "");
+    el.className = "camtick" + (Math.abs(k.t - playhead) < KEY_EPS ? " onkey" : "") + (k.curve ? " curved" : "");
     el.style.left = (k.t * w) + "px";
     el.title = `t=${k.t.toFixed(2)} — drag to retime, click to jump, alt-click to delete`;
     el.addEventListener("pointerdown", (ev) => {
@@ -6392,6 +6457,136 @@ function drawCamRow() {
     });
     row.appendChild(el);
   }
+  refreshArrival();
+}
+
+/* Arrival editor — DEV_PLAN_CAMERA.md Phase 1. The key it edits is the key
+   AT THE PLAYHEAD (camKeyIndexAt), exactly as Add/Remove key and the .onkey
+   highlight already work, so there is no separate selection state to drift.
+   drawCamRow() calls this, which covers every way the playhead or the keys
+   change (scrub, tick click, key jump, add/remove, preset load, playback).
+   It redraws only when what it would draw has changed, so the every-frame
+   call during playback costs a string compare.
+
+   Deliberately does NOT drive the camera while a handle is dragged: at a key
+   the camera sits exactly on that key's pose whatever its arrival curve is,
+   so the view would not change, and a driveCamera() would only snap away any
+   manual orbit and clear the "off curve" marker. The canvas is the feedback. */
+const ARR_W = 200, ARR_H = 112, ARR_PAD = 12;
+const arrToPx = (x, y) => [ARR_PAD + x * (ARR_W - 2 * ARR_PAD), ARR_H - ARR_PAD - y * (ARR_H - 2 * ARR_PAD)];
+const arrFromPx = (px, py) => [(px - ARR_PAD) / (ARR_W - 2 * ARR_PAD), (ARR_H - ARR_PAD - py) / (ARR_H - 2 * ARR_PAD)];
+let arrInk = null;                    // CSS tokens, read once on first draw
+
+/* The key the editor edits, or null with the reason it is disabled. The
+   first key is never editable: nothing arrives at it. */
+function camArrTarget() {
+  const i = camKeyIndexAt(playhead);
+  if (i < 0) return { key: null, why: "Scrub to a key to shape how the camera arrives there." };
+  if (i === 0) return { key: null, why: "The first key has nothing arriving at it." };
+  return { key: CAMKEYS[i], i };
+}
+
+function refreshArrival() {
+  const cv = $("camArrCanvas");
+  if (!cv) return;
+  const { key, why, i } = camArrTarget();
+  const dpr = window.devicePixelRatio || 1;
+  const sig = key ? `${i}|${key.curve ? key.curve.join() : "auto:" + V.ease}|${dpr}` : `off|${why}|${dpr}`;
+  if (sig === camArrSig) return;
+  camArrSig = sig;
+
+  $("camArrival").classList.toggle("off", !key);
+  $("camArrHint").textContent = key
+    ? `Arriving at key ${i + 1} of ${CAMKEYS.length} — ${key.curve ? "custom curve" : "Auto (follows Ease)"}.`
+    : why;
+  for (const b of document.querySelectorAll("#camArrPresets button[data-curve]")) {
+    b.disabled = !key;
+    b.classList.toggle("on", !!key?.curve && key.curve.join() === CAM_CURVES[b.dataset.curve].join());
+  }
+  $("camArrAuto").disabled = !key?.curve;
+
+  if (!arrInk) {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (n) => cs.getPropertyValue(n).trim();
+    arrInk = { rule: v("--rule"), dim: v("--ink-dim"), signal: v("--signal"), edit: v("--edit") };
+  }
+  if (cv.width !== ARR_W * dpr) { cv.width = ARR_W * dpr; cv.height = ARR_H * dpr; }
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, ARR_W, ARR_H);
+  g.strokeStyle = arrInk.rule;
+  g.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) {
+    const [x] = arrToPx(k / 4, 0), [, y] = arrToPx(0, k / 4);
+    g.beginPath(); g.moveTo(x, arrToPx(0, 0)[1]); g.lineTo(x, arrToPx(0, 1)[1]); g.stroke();
+    g.beginPath(); g.moveTo(arrToPx(0, 0)[0], y); g.lineTo(arrToPx(1, 0)[0], y); g.stroke();
+  }
+  if (!key) return;
+
+  const custom = !!key.curve;
+  const f = custom ? (u) => bezier(key.curve, u) : (u) => ease(u, V.ease);
+  g.strokeStyle = custom ? arrInk.signal : arrInk.dim;
+  g.setLineDash(custom ? [] : [4, 3]);
+  g.lineWidth = 2;
+  g.beginPath();
+  for (let s = 0; s <= 64; s++) { const [x, y] = arrToPx(s / 64, f(s / 64)); if (s) g.lineTo(x, y); else g.moveTo(x, y); }
+  g.stroke();
+  g.setLineDash([]);
+  g.lineWidth = 1;
+  /* Handles show on Auto too, ready to drag: dragging one starts from Smooth. */
+  const pts = key.curve ?? CAM_CURVES.smooth;
+  const [p0, h1, h2, p3] = [arrToPx(0, 0), arrToPx(pts[0], pts[1]), arrToPx(pts[2], pts[3]), arrToPx(1, 1)];
+  g.strokeStyle = arrInk.edit;
+  g.globalAlpha = 0.5;
+  g.beginPath(); g.moveTo(...p0); g.lineTo(...h1); g.moveTo(...p3); g.lineTo(...h2); g.stroke();
+  g.globalAlpha = custom ? 1 : 0.45;
+  g.fillStyle = arrInk.edit;
+  for (const p of [h1, h2]) { g.beginPath(); g.arc(p[0], p[1], 4.5, 0, Math.PI * 2); g.fill(); }
+  g.globalAlpha = 1;
+}
+
+/* Writes the edited key's curve and redraws the row (its tick ring) and the
+   editor. No rebuildCamCurves(): the Catmull-Rom path depends only on key
+   positions, never on curves — sampleCam reads `curve` live. */
+function setKeyCurve(key, curve) {
+  key.curve = cleanCurve(curve);
+  camArrSig = "";
+  drawCamRow();
+}
+
+{
+  const cv = $("camArrCanvas");
+  const local = (ev) => { const r = cv.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
+  cv.addEventListener("pointerdown", (ev) => {
+    const { key } = camArrTarget();
+    if (!key) return;
+    const [x, y] = local(ev);
+    const pts = key.curve ?? CAM_CURVES.smooth;
+    const d = (h) => Math.hypot(...arrToPx(pts[2 * h], pts[2 * h + 1]).map((v, k) => v - [x, y][k]));
+    const h = d(0) <= d(1) ? 0 : 1;
+    if (d(h) > (ev.pointerType === "touch" ? 24 : 14)) return;   // touch gets the bigger hit radius
+    camArrDrag = { key, h };
+    cv.setPointerCapture(ev.pointerId);
+    ev.preventDefault();
+  });
+  cv.addEventListener("pointermove", (ev) => {
+    if (!camArrDrag) return;
+    const [x, y] = arrFromPx(...local(ev));
+    const pts = [...(camArrDrag.key.curve ?? CAM_CURVES.smooth)];
+    pts[2 * camArrDrag.h] = clampNum(x, 0, 1);
+    pts[2 * camArrDrag.h + 1] = clampNum(y, 0, 1);
+    setKeyCurve(camArrDrag.key, pts.map((v) => Math.round(v * 1000) / 1000));
+  });
+  for (const t of ["pointerup", "pointercancel"]) cv.addEventListener(t, () => { camArrDrag = null; });
+  for (const b of document.querySelectorAll("#camArrPresets button[data-curve]")) {
+    b.onclick = () => { const { key } = camArrTarget(); if (key) setKeyCurve(key, [...CAM_CURVES[b.dataset.curve]]); };
+  }
+  $("camArrAuto").onclick = () => { const { key } = camArrTarget(); if (key) setKeyCurve(key, null); };
+  $("camKeyPrev").onclick = () => jumpCamKey(-1);
+  $("camKeyNext").onclick = () => jumpCamKey(1);
+  /* Auto draws ease(x, V.ease), so moving the slider has to redraw it. The
+     generic slider handler, bound earlier, has already updated V by now. */
+  $("p-ease").addEventListener("input", () => refreshArrival());
 }
 
 /* Camera key drag — retimes in place. Deliberately does NOT call
@@ -6766,7 +6961,7 @@ $("render").onclick = async () => {
    follow. */
 const PRESET_FORMAT = "gausseous-preset";
 const PRESET_FORMAT_LEGACY = "splat-bench-preset";
-const PRESET_VERSION = 10;   // v2 selects; v3 audio; v4 regions+mask; v5 camera keyframes; v6 depth of field re-expressed; v7 points, lights, timeline length, hit source; v8 mesh; v9 fracture, CRT, background hue; v10 background on hits
+const PRESET_VERSION = 11;   // v2 selects; v3 audio; v4 regions+mask; v5 camera keyframes; v6 depth of field re-expressed; v7 points, lights, timeline length, hit source; v8 mesh; v9 fracture, CRT, background hue; v10 background on hits; v11 camera arrival curves
 /* `mobileMode` is deliberately absent: it is a property of the device you are
    sitting at, not of the look. A preset saved on a desktop must not force a
    phone back to full pixel ratio, nor the reverse. */
@@ -6795,7 +6990,7 @@ function serialize() {
     selects: Object.fromEntries(SELECTS.map((id) => [id, $(id).value])),
     output: { res: $("res").value, fps: $("fps").value },   // kept for v1 readers
     camera: {
-      keys: CAMKEYS.map((k) => ({ t: +k.t.toFixed(6), pos: k.pos, tgt: k.tgt, fov: k.fov })),
+      keys: CAMKEYS.map((k) => ({ t: +k.t.toFixed(6), pos: k.pos, tgt: k.tgt, fov: k.fov, ...(k.curve ? { curve: k.curve } : {}) })),   // curve only when shaped
       smooth: camSmooth,
       mode: camMode,
     },
@@ -7073,6 +7268,7 @@ function applyPreset(o) {
         pos: k.pos.map(Number),
         tgt: k.tgt.map(Number),
         fov: Number.isFinite(k.fov) ? clamp(k.fov, 10, 120) : 50,
+        curve: cleanCurve(k.curve),     // v11; absent, malformed or pre-v11 -> null (Auto)
       }))
       .sort((a, b) => a.t - b.t);
     camSmooth = o.camera.smooth !== false;
