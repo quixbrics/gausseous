@@ -247,6 +247,13 @@ segment** built in `rebuildCamCurves()`:
 - Tangents at a key shared with a curved segment stay as computed (don't
   zero them). The curve's own end slope decides how the camera arrives and
   leaves. Presets with flat ends (Smooth, Fast) still stop on the key.
+  *Amended during Phase 2:* that rule only governs the curved side. Taken
+  literally, a Fast landing stops dead on its key and the next Auto segment
+  launches at full speed in the same instant. So the **Auto neighbour's**
+  tangent at the shared key is scaled by the curve's slope at that end, to
+  match speeds. It is chord-capped like any tangent when the scale is above
+  1. The curved segment's own tangents, and so its shape, are unchanged.
+  See NOTES, Camera dynamics, Phase 2.
 
 Do **not** port GS_Bed's per-axis monotone (harmonic-mean) tangents here.
 They suit rig-space axes, but in world XYZ an orbit reverses x and z

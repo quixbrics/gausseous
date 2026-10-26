@@ -155,6 +155,11 @@
   #camArrPresets button{text-align:left}
   #camArrival.off #camArrCanvas{opacity:.35; pointer-events:none}
   #camArrHint{color:var(--ink-dim); margin:6px 0 0; min-height:1.2em}
+  /* Flow timing ignores the Ease slider for Auto keys: dim it, don't hide it,
+     since its envelope and audio routes still exist and come back in Ease. */
+  #camEaseRow.flowdim{opacity:.4}
+  #camEaseHint{display:none; color:var(--ink-dim); margin:-4px 0 9px}
+  #camEaseHint.show{display:block}
   #laneWrap{position:relative; flex:1; min-height:0}
   #laneCanvas{width:100%; height:100%; cursor:crosshair; touch-action:none}
   #laneHint{
@@ -773,13 +778,18 @@
       fighting each other. Picking one does not move the camera; it only changes
       what future orbiting turns around.
     </p>
-    <div class="row"><label>Ease</label><output id="o-ease">—</output>
+    <div class="row" id="camEaseRow"><label>Ease</label><output id="o-ease">—</output>
       <input type="range" id="p-ease" min="0" max="1" step="0.01" value="0.8"></div>
+    <p id="camEaseHint">Ease is used by keys set to Auto in Ease timing only.</p>
 
     <div class="btns" style="margin:9px 0" id="camKeyBtns">
       <button id="camAddKey" title="Add a camera keyframe at the current playhead">Add key</button>
       <button id="camRemoveKey" title="Remove the camera keyframe at the current playhead">Remove key</button>
       <button id="camSmooth" title="Path shape between keyframes" class="on">Smooth</button>
+    </div>
+    <div class="btns" style="margin:0 0 9px" id="camTimingBtns">
+      <button type="button" data-timing="ease" class="on" title="Timing: each segment eases on its own, so the camera settles at every key">Ease</button>
+      <button type="button" data-timing="flow" title="Timing: the camera keeps its speed through keys. Keys with their own arrival curve still land on that curve">Flow</button>
     </div>
     <p style="color:var(--ink-dim); margin:8px 0" id="camKeyCount">
       <span id="camKeyCountText">No camera keyframes — camera stays under manual orbit control.</span>
@@ -4861,7 +4871,9 @@ async function loadSplat(source, label) {
        Same reasoning as the transform reset just above. */
     CAMKEYS = [];
     camSmooth = true;
+    camTiming = "ease";
     rebuildCamCurves();
+    refreshPathUI();
     refreshCamUI();
 
     const n = splatCount(mesh).toLocaleString();
@@ -5051,7 +5063,62 @@ const cleanCurve = (c) =>
     ? c.map((v) => clampNum(v, 0, 1))
     : null;
 
+/* Flow timing — DEV_PLAN_CAMERA.md Phase 2. "ease" is today: every segment
+   eased on its own, so the camera nearly stops at each key. "flow" carries
+   velocity through keys.
+
+   Flow can't be had by remapping u on the Catmull-Rom curves above: those
+   are parametrised by key INDEX, so the camera's speed jumps at every key
+   whose neighbouring segments differ in length or duration (the per-segment
+   ease is what hides that today). Flow samples one cubic Hermite per
+   segment instead, with tangents in units of timeline t:
+   - pos / tgt: time-scaled Catmull-Rom, (p[i+1] - p[i-1]) / (t[i+1] - t[i-1]),
+     scaled down so |m|·h <= 2·|chord| on both adjacent segments. That cap is
+     what stops a short segment beside a long one from looping.
+   - fov: monotone (harmonic mean of the adjacent slopes, 0 where they change
+     sign), so fov never overshoots a key's value. That suits a scalar; for
+     world XYZ it would zero the velocity every time an orbit reverses x or z.
+   - first and last key: 0, so the move starts and ends at rest.
+   Tangents ignore arrival curves on purpose: a curved segment keeps the
+   path's shape and is only retimed by its curve. */
+let camTiming = "ease";               // "ease" | "flow"
+let camFlow = null;                   // Flow tangents for CAMKEYS, rebuilt with the curves
+
+function flowTangents(keys) {
+  const n = keys.length;
+  const pos = [], tgt = [], fov = [];
+  const vecTangent = (i, get) => {
+    if (i === 0 || i === n - 1) return [0, 0, 0];
+    const p0 = get(keys[i - 1]), p1 = get(keys[i]), p2 = get(keys[i + 1]);
+    const dt = keys[i + 1].t - keys[i - 1].t;
+    const m = dt > 0 ? [0, 1, 2].map((j) => (p2[j] - p0[j]) / dt) : [0, 0, 0];
+    const len = Math.hypot(...m);
+    if (!(len > 0)) return [0, 0, 0];
+    let s = 1;
+    for (const [q0, q1, h] of [[p0, p1, keys[i].t - keys[i - 1].t], [p1, p2, keys[i + 1].t - keys[i].t]]) {
+      const chord = Math.hypot(q1[0] - q0[0], q1[1] - q0[1], q1[2] - q0[2]);
+      if (h > 0) s = Math.min(s, (2 * chord) / (len * h));
+    }
+    return m.map((v) => v * s);
+  };
+  for (let i = 0; i < n; i++) {
+    pos.push(vecTangent(i, (k) => k.pos));
+    tgt.push(vecTangent(i, (k) => k.tgt));
+    if (i === 0 || i === n - 1) { fov.push(0); continue; }
+    const sa = (keys[i].fov - keys[i - 1].fov) / Math.max(keys[i].t - keys[i - 1].t, 1e-9);
+    const sb = (keys[i + 1].fov - keys[i].fov) / Math.max(keys[i + 1].t - keys[i].t, 1e-9);
+    fov.push(sa * sb > 0 ? (2 * sa * sb) / (sa + sb) : 0);
+  }
+  return { n, pos, tgt, fov };
+}
+
+const hermite = (p0, p1, m0, m1, h, u) => {
+  const u2 = u * u, u3 = u2 * u;
+  return (2 * u3 - 3 * u2 + 1) * p0 + (u3 - 2 * u2 + u) * h * m0 + (-2 * u3 + 3 * u2) * p1 + (u3 - u2) * h * m1;
+};
+
 function rebuildCamCurves() {
+  camFlow = CAMKEYS.length >= 2 ? flowTangents(CAMKEYS) : null;
   if (CAMKEYS.length < 3) { camPosCurve = camTgtCurve = null; return; }
   camPosCurve = new THREE.CatmullRomCurve3(CAMKEYS.map((k) => new THREE.Vector3(...k.pos)));
   camTgtCurve = new THREE.CatmullRomCurve3(CAMKEYS.map((k) => new THREE.Vector3(...k.tgt)));
@@ -5095,6 +5162,7 @@ function sampleCam(playheadT) {
   const a = CAMKEYS[i], b = CAMKEYS[i + 1];
   const span = Math.max(b.t - a.t, 1e-9);
   const localRaw = Math.min(1, Math.max(0, (playheadT - a.t) / span));
+  if (camTiming === "flow") return sampleFlow(i, localRaw, span);
   const localU = b.curve ? bezier(b.curve, localRaw) : ease(localRaw, V.ease);   // b's arrival curve, else Auto
   const fov = a.fov + (b.fov - a.fov) * localU;
 
@@ -5104,6 +5172,63 @@ function sampleCam(playheadT) {
   }
   const lerp3 = (p, q, u) => [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u, p[2] + (q[2] - p[2]) * u];
   return { pos: lerp3(a.pos, b.pos, localU), tgt: lerp3(a.tgt, b.tgt, localU), fov };
+}
+
+/* Flow-timing sample of segment i (key i -> key i+1). Pure, like sampleCam.
+   An Auto segment plays at the raw time fraction; a segment whose
+   destination key has a curve is retimed by it (a deliberate landing — flat-
+   ended presets like Smooth and Fast still stop on the key). Linear shape
+   stays straight and constant-speed per segment: speed steps at keys, which
+   is what Linear means. The tangent cache is only rebuilt on drop, add,
+   remove and load, so if it is missing or stale in length it is recomputed
+   here rather than read wrong. */
+function sampleFlow(i, localRaw, h) {
+  const a = CAMKEYS[i], b = CAMKEYS[i + 1];
+  const u = b.curve ? bezier(b.curve, localRaw) : localRaw;
+  if (!camSmooth) {
+    const lerp3 = (p, q) => [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u, p[2] + (q[2] - p[2]) * u];
+    return { pos: lerp3(a.pos, b.pos), tgt: lerp3(a.tgt, b.tgt), fov: a.fov + (b.fov - a.fov) * u };
+  }
+  const T = camFlow?.n === CAMKEYS.length ? camFlow : flowTangents(CAMKEYS);
+  /* A curved segment moves at (tangent x its curve's end slope) at each end,
+     so a flat-ended landing (Smooth, Fast) is at rest on its key. An Auto
+     neighbour sharing that key matches it: its tangent there is scaled by
+     the curve's slope at the shared end. Without this the camera would stop
+     dead on a landing and launch at full speed the same instant (or arrive
+     at speed into a segment that starts from rest). The curved segment's
+     own tangents are left alone, so its shape is the path's. A scale above
+     1 (a curve arriving faster than the flow) is capped against this
+     segment's chord like any other tangent, so it can't loop. */
+  let s0 = 1, s1 = 1;
+  if (!b.curve) {
+    if (i > 0 && a.curve) s0 = curveEndSlope(a.curve, 1);
+    if (CAMKEYS[i + 2]?.curve) s1 = curveEndSlope(CAMKEYS[i + 2].curve, 0);
+  }
+  const scale3 = (m, s, p, q) => {
+    if (s === 1) return m;
+    const out = m.map((v) => v * s);
+    const len = Math.hypot(...out), chord = Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]);
+    return len * h > 2 * chord && len > 0 ? out.map((v) => (v * 2 * chord) / (len * h)) : out;
+  };
+  const scale1 = (m, s, p, q) => {
+    if (s === 1) return m;
+    const v = m * s, lim = 2 * Math.abs(q - p) / h;
+    return Math.max(-lim, Math.min(lim, v));
+  };
+  const h3 = (p, q, m0, m1) => [0, 1, 2].map((j) => hermite(p[j], q[j], m0[j], m1[j], h, u));
+  return {
+    pos: h3(a.pos, b.pos, scale3(T.pos[i], s0, a.pos, b.pos), scale3(T.pos[i + 1], s1, a.pos, b.pos)),
+    tgt: h3(a.tgt, b.tgt, scale3(T.tgt[i], s0, a.tgt, b.tgt), scale3(T.tgt[i + 1], s1, a.tgt, b.tgt)),
+    fov: hermite(a.fov, b.fov, scale1(T.fov[i], s0, a.fov, b.fov), scale1(T.fov[i + 1], s1, a.fov, b.fov), h, u),
+  };
+}
+
+/* Slope du/dx of an arrival curve at its start (end = 0) or finish (end = 1),
+   by a one-sided difference, which stays finite where the closed form
+   divides by zero (a handle sitting on the corner). */
+function curveEndSlope(c, end) {
+  const e = 1e-4;
+  return end ? (1 - bezier(c, 1 - e)) / e : bezier(c, e) / e;
 }
 
 /* ------------------------------------------------------------------ *
@@ -5165,8 +5290,9 @@ function evaluateCamera(t) {
    overwrote manual orbit input on the very next frame, permanently pinning
    the camera the moment one keyframe existed). It now fires only on:
    playhead change (playback tick, scrub, or a camera-key tick jumping via
-   setPlayhead), camera mode change, Reframe, preset load, and every frame of
-   the export loop (which force-writes deliberately — see there). */
+   setPlayhead), camera mode change, a path shape or timing change
+   (Smooth/Linear, Ease/Flow), Reframe, preset load, and every frame of the
+   export loop (which force-writes deliberately — see there). */
 function driveCamera(t = playhead) {
   const s = evaluateCamera(t);
   if (!s) return;
@@ -6491,13 +6617,14 @@ function refreshArrival() {
   if (!cv) return;
   const { key, why, i } = camArrTarget();
   const dpr = window.devicePixelRatio || 1;
-  const sig = key ? `${i}|${key.curve ? key.curve.join() : "auto:" + V.ease}|${dpr}` : `off|${why}|${dpr}`;
+  const flow = camTiming === "flow";
+  const sig = key ? `${i}|${key.curve ? key.curve.join() : flow ? "auto:flow" : "auto:" + V.ease}|${dpr}` : `off|${why}|${dpr}`;
   if (sig === camArrSig) return;
   camArrSig = sig;
 
   $("camArrival").classList.toggle("off", !key);
   $("camArrHint").textContent = key
-    ? `Arriving at key ${i + 1} of ${CAMKEYS.length} — ${key.curve ? "custom curve" : "Auto (follows Ease)"}.`
+    ? `Arriving at key ${i + 1} of ${CAMKEYS.length} — ${key.curve ? "custom curve" : flow ? "Auto (flows through)" : "Auto (follows Ease)"}.`
     : why;
   for (const b of document.querySelectorAll("#camArrPresets button[data-curve]")) {
     b.disabled = !key;
@@ -6524,7 +6651,9 @@ function refreshArrival() {
   if (!key) return;
 
   const custom = !!key.curve;
-  const f = custom ? (u) => bezier(key.curve, u) : (u) => ease(u, V.ease);
+  /* Auto in Flow is the raw time fraction: the path's own Hermite carries the
+     speed, so the honest picture of its timing is the diagonal. */
+  const f = custom ? (u) => bezier(key.curve, u) : flow ? (u) => u : (u) => ease(u, V.ease);
   g.strokeStyle = custom ? arrInk.signal : arrInk.dim;
   g.setLineDash(custom ? [] : [4, 3]);
   g.lineWidth = 2;
@@ -6635,12 +6764,32 @@ function refreshCamUI() {
 }
 $("camAddKey").onclick = addCamKey;
 $("camRemoveKey").onclick = removeCamKeyAtPlayhead;
-$("camSmooth").onclick = () => {
-  camSmooth = !camSmooth;
+/* Shape and timing buttons from state. Every place that sets camSmooth or
+   camTiming (the buttons, a new capture, preset load) ends here, so a label
+   can't disagree with what the sampler does. */
+function refreshPathUI() {
   $("camSmooth").textContent = camSmooth ? "Smooth" : "Linear";
   $("camSmooth").classList.toggle("on", camSmooth);
+  for (const b of document.querySelectorAll("#camTimingBtns button")) b.classList.toggle("on", b.dataset.timing === camTiming);
+  $("camEaseRow").classList.toggle("flowdim", camTiming === "flow");
+  $("camEaseHint").classList.toggle("show", camTiming === "flow");
+  camArrSig = "";             // Auto draws differently in Flow
+  refreshArrival();
+}
+$("camSmooth").onclick = () => {
+  camSmooth = !camSmooth;
+  refreshPathUI();
+  driveCamera();
   pushUniforms();
 };
+for (const b of document.querySelectorAll("#camTimingBtns button")) {
+  b.onclick = () => {
+    camTiming = b.dataset.timing;
+    refreshPathUI();
+    driveCamera();            // the path between keys changed; show it at this playhead now
+    pushUniforms();
+  };
+}
 addEventListener("resize", drawCamRow);
 refreshCamUI();
 
@@ -6992,6 +7141,7 @@ function serialize() {
     camera: {
       keys: CAMKEYS.map((k) => ({ t: +k.t.toFixed(6), pos: k.pos, tgt: k.tgt, fov: k.fov, ...(k.curve ? { curve: k.curve } : {}) })),   // curve only when shaped
       smooth: camSmooth,
+      timing: camTiming,
       mode: camMode,
     },
     envelopes: envs,
@@ -7272,6 +7422,7 @@ function applyPreset(o) {
       }))
       .sort((a, b) => a.t - b.t);
     camSmooth = o.camera.smooth !== false;
+    camTiming = o.camera.timing === "flow" ? "flow" : "ease";   // absent (pre-Flow) = ease
   } else if (o.camera?.A || o.camera?.B) {
     CAMKEYS = [];
     if (isVec3(o.camera.A?.pos) && isVec3(o.camera.A?.tgt)) {
@@ -7281,14 +7432,15 @@ function applyPreset(o) {
       CAMKEYS.push({ t: 1, pos: o.camera.B.pos.map(Number), tgt: o.camera.B.tgt.map(Number), fov: 50 });
     }
     camSmooth = true;
+    camTiming = "ease";
     if (CAMKEYS.length) applyPreset.migrationNotes.push(`camera A/B -> ${CAMKEYS.length} keyframe${CAMKEYS.length === 1 ? "" : "s"}`);
   } else {
     CAMKEYS = [];
     camSmooth = true;
+    camTiming = "ease";
   }
   rebuildCamCurves();
-  $("camSmooth").textContent = camSmooth ? "Smooth" : "Linear";
-  $("camSmooth").classList.toggle("on", camSmooth);
+  refreshPathUI();
   refreshCamUI();
 
   /* v4-and-earlier presets have no `camera.mode` at all (the mode select is
@@ -8300,14 +8452,14 @@ if (DEBUG) {
      every one of them back afterwards, whatever fn does. sampleCam reads
      globals by design (it is the app's real sampler), so this swap is how
      the harness exercises it without touching its code path. */
-  const camWith = (keys, { smooth = true, ease: easeK = 0.8 } = {}, fn) => {
-    const saved = { keys: CAMKEYS, smooth: camSmooth, ease: V.ease };
+  const camWith = (keys, { smooth = true, ease: easeK = 0.8, timing = "ease" } = {}, fn) => {
+    const saved = { keys: CAMKEYS, smooth: camSmooth, ease: V.ease, timing: camTiming };
     try {
-      CAMKEYS = keys; camSmooth = smooth; V.ease = easeK;
+      CAMKEYS = keys; camSmooth = smooth; V.ease = easeK; camTiming = timing;
       rebuildCamCurves();
       return fn();
     } finally {
-      CAMKEYS = saved.keys; camSmooth = saved.smooth; V.ease = saved.ease;
+      CAMKEYS = saved.keys; camSmooth = saved.smooth; V.ease = saved.ease; camTiming = saved.timing;
       rebuildCamCurves();
     }
   };
@@ -8349,9 +8501,54 @@ if (DEBUG) {
     return { ...worst, pass: worst.pos <= 1e-12 && worst.tgt <= 1e-12 && worst.fov <= 1e-12, byFixture };
   };
 
+  /* Gate 2, Flow timing: (a) velocity continuity through interior keys
+     between two Auto segments, by one-sided finite differences; (b) no loops:
+     every sample inside the keys' bounding box grown by 10% of its diagonal;
+     (c) corner-cutting on the circle: the closest the camera gets to the
+     target, as a fraction of the nearest key's distance. (c)'s number is the
+     evidence for or against Phase 4 (Orbit shape). */
+  const camGate2 = () => {
+    const fx = camFixtures(), dt = 1e-6, out = {};
+    const vel = (t0, t1) => { const p = sampleCam(t0).pos, q = sampleCam(t1).pos; return [0, 1, 2].map((j) => (q[j] - p[j]) / (t1 - t0)); };
+    camWith(fx.uneven, { timing: "flow" }, () => {
+      const lo = [0, 1, 2].map((j) => Math.min(...fx.uneven.map((k) => k.pos[j])));
+      const hi = [0, 1, 2].map((j) => Math.max(...fx.uneven.map((k) => k.pos[j])));
+      const diag = Math.hypot(...hi.map((v, j) => v - lo[j]));
+      const keyVel = [];
+      let worstRel = 0;
+      for (let i = 1; i < fx.uneven.length - 1; i++) {
+        const t = fx.uneven[i].t;
+        const vL = vel(t - dt, t), vR = vel(t, t + dt);
+        const mag = Math.max(Math.hypot(...vL), Math.hypot(...vR));
+        const gap = Math.hypot(...vL.map((v, j) => v - vR[j]));
+        const ok = gap <= 0.02 * mag || gap <= 1e-6 * diag;
+        if (mag > 0) worstRel = Math.max(worstRel, gap / mag);
+        keyVel.push({ t, speedL: +Math.hypot(...vL).toFixed(4), speedR: +Math.hypot(...vR).toFixed(4), ok });
+      }
+      let outside = 0;
+      for (const t of camSampleTs(fx.uneven)) {
+        const p = sampleCam(t).pos;
+        for (let j = 0; j < 3; j++) outside = Math.max(outside, lo[j] - p[j], p[j] - hi[j]);
+      }
+      out.a = { pass: keyVel.every((k) => k.ok), worstRel, keyVel };
+      out.b = { pass: outside <= 0.1 * diag, worstOutside: outside, limit: 0.1 * diag };
+    });
+    for (const timing of ["flow", "ease"]) {
+      camWith(fx.circle, { timing }, () => {
+        const tg = fx.circle[0].tgt, d = (p) => Math.hypot(p[0] - tg[0], p[1] - tg[1], p[2] - tg[2]);
+        const keyMin = Math.min(...fx.circle.map((k) => d(k.pos)));
+        let minD = Infinity;
+        for (const t of camSampleTs(fx.circle)) minD = Math.min(minD, d(sampleCam(t).pos));
+        out[timing === "flow" ? "c" : "cEaseForReference"] = { pass: minD >= 0.85 * keyMin, minFraction: minD / keyMin };
+      });
+    }
+    out.pass = out.a.pass && out.b.pass && out.c.pass;
+    return out;
+  };
+
   window.__bench = {
     renderer, scene, camera, controls, spark,
-    camCheck, sampleCamLegacy, camFixtures, camWith, camSampleTs, camDiff,
+    camCheck, camGate2, sampleCamLegacy, camFixtures, camWith, camSampleTs, camDiff,
     get mesh() { return mesh; },
     get V()    { return V; },
     get P()    { return P; },
@@ -8389,6 +8586,8 @@ if (DEBUG) {
     get bounds(){ return bounds; },
     get CAMKEYS(){ return CAMKEYS; },
     get camSmooth(){ return camSmooth; },
+    get camTiming(){ return camTiming; },
+    get camFlow(){ return camFlow; },
     sampleCam,
     sampleOrbit,
     evaluateCamera,
