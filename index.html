@@ -790,7 +790,11 @@
     <div class="btns" style="margin:9px 0" id="camKeyBtns">
       <button id="camAddKey" title="Add a camera keyframe at the current playhead">Add key</button>
       <button id="camRemoveKey" title="Remove the camera keyframe at the current playhead">Remove key</button>
-      <button id="camSmooth" title="Path shape between keyframes" class="on">Smooth</button>
+    </div>
+    <div class="btns" style="margin:0 0 9px" id="camShapeBtns">
+      <button type="button" data-shape="linear" title="Path: straight lines between keys">Linear</button>
+      <button type="button" data-shape="smooth" class="on" title="Path: a smooth curve through the keys">Smooth</button>
+      <button type="button" data-shape="orbit" title="Path: swing around the target, easing the distance between keys rather than cutting the corner. Turns the short way round; add a key in between to go the long way">Orbit</button>
     </div>
     <div class="btns" style="margin:0 0 9px" id="camTimingBtns">
       <button type="button" data-timing="ease" class="on" title="Timing: each segment eases on its own, so the camera settles at every key">Ease</button>
@@ -4884,7 +4888,7 @@ async function loadSplat(source, label) {
        — meaningless, possibly wildly out of frame, against a different one.
        Same reasoning as the transform reset just above. */
     CAMKEYS = [];
-    camSmooth = true;
+    camShape = "smooth";
     camTiming = "ease";
     rebuildCamCurves();
     refreshPathUI();
@@ -5040,7 +5044,7 @@ addEventListener("drop", async (e) => {
  * costs nothing to carry now.
  * ------------------------------------------------------------------ */
 let CAMKEYS = [];
-let camSmooth = true;                 // path shape: curved vs straight segments
+let camShape = "smooth";              // path shape: "linear" | "smooth" | "orbit"
 let camPosCurve = null, camTgtCurve = null;   // THREE.CatmullRomCurve3, rebuilt on any mutation
 let camArrSig = "";                   // last-drawn state of the Arrival editor — redraw only when it changes
 let camArrDrag = null;                // { key, h } while a handle is dragged; h = 0 | 1
@@ -5098,6 +5102,15 @@ const cleanCurve = (c) =>
 let camTiming = "ease";               // "ease" | "flow"
 let camFlow = null;                   // Flow tangents for CAMKEYS, rebuilt with the curves
 
+/* Monotone tangent of a scalar channel at key i: harmonic mean of the two
+   adjacent slopes, 0 where they change sign and at both end keys. */
+function monoTangent(keys, vals, i) {
+  if (i === 0 || i === keys.length - 1) return 0;
+  const sa = (vals[i] - vals[i - 1]) / Math.max(keys[i].t - keys[i - 1].t, 1e-9);
+  const sb = (vals[i + 1] - vals[i]) / Math.max(keys[i + 1].t - keys[i].t, 1e-9);
+  return sa * sb > 0 ? (2 * sa * sb) / (sa + sb) : 0;
+}
+
 function flowTangents(keys) {
   const n = keys.length;
   const pos = [], tgt = [], fov = [];
@@ -5118,13 +5131,45 @@ function flowTangents(keys) {
   for (let i = 0; i < n; i++) {
     pos.push(vecTangent(i, (k) => k.pos));
     tgt.push(vecTangent(i, (k) => k.tgt));
-    if (i === 0 || i === n - 1) { fov.push(0); continue; }
-    const sa = (keys[i].fov - keys[i - 1].fov) / Math.max(keys[i].t - keys[i - 1].t, 1e-9);
-    const sb = (keys[i + 1].fov - keys[i].fov) / Math.max(keys[i + 1].t - keys[i].t, 1e-9);
-    fov.push(sa * sb > 0 ? (2 * sa * sb) / (sa + sb) : 0);
   }
+  const fovs = keys.map((k) => k.fov);
+  for (let i = 0; i < n; i++) fov.push(monoTangent(keys, fovs, i));
   return { n, pos, tgt, fov };
 }
+
+/* Orbit shape — DEV_PLAN_CAMERA.md Phase 4. Smooth and Linear move the
+   camera position through space, so between two keys on a circle round the
+   target it cuts the corner (about 80% of the distance at 90° spacing).
+   Orbit moves the camera's OFFSET from the target instead: each key's
+   pos - tgt as (az, el, log R), interpolated per channel, and the camera is
+   the interpolated target plus that offset. Distance is eased in log space,
+   so push-ins and pull-outs feel even. az is unwrapped key to key along the
+   shortest turn (350° -> 10° turns 20°, not 340°); to go the long way, add a
+   key in between. el is clamped to ±89° so az stays defined. Flow uses the
+   monotone tangents above on all three channels: no overshoot past a key's
+   angle or distance. Y is up, az measured from +z towards +x. */
+const ORBIT_EL_MAX = (89 * Math.PI) / 180;
+let camSph = null;                    // Orbit-shape key offsets and tangents, rebuilt with the curves
+
+function sphKeys(keys) {
+  const az = [], el = [], lr = [];
+  keys.forEach((k, i) => {
+    const d = [0, 1, 2].map((j) => k.pos[j] - k.tgt[j]);
+    const R = Math.max(Math.hypot(...d), 1e-6);
+    const raw = Math.atan2(d[0], d[2]);
+    if (i === 0) az.push(raw);
+    else { const dz = raw - az[i - 1]; az.push(az[i - 1] + dz - 2 * Math.PI * Math.round(dz / (2 * Math.PI))); }
+    el.push(clampNum(Math.asin(clampNum(d[1] / R, -1, 1)), -ORBIT_EL_MAX, ORBIT_EL_MAX));
+    lr.push(Math.log(R));
+  });
+  const tan = (vals) => keys.map((_, i) => monoTangent(keys, vals, i));
+  return { n: keys.length, az, el, lr, maz: tan(az), mel: tan(el), mlr: tan(lr) };
+}
+const sphToPos = (tgt, az, el, lr) => {
+  const R = Math.exp(lr), c = Math.cos(el);
+  return [tgt[0] + R * c * Math.sin(az), tgt[1] + R * Math.sin(el), tgt[2] + R * c * Math.cos(az)];
+};
+const camSphFor = () => (camSph?.n === CAMKEYS.length ? camSph : sphKeys(CAMKEYS));
 
 const hermite = (p0, p1, m0, m1, h, u) => {
   const u2 = u * u, u3 = u2 * u;
@@ -5133,6 +5178,7 @@ const hermite = (p0, p1, m0, m1, h, u) => {
 
 function rebuildCamCurves() {
   camFlow = CAMKEYS.length >= 2 ? flowTangents(CAMKEYS) : null;
+  camSph = CAMKEYS.length >= 2 ? sphKeys(CAMKEYS) : null;
   if (CAMKEYS.length < 3) { camPosCurve = camTgtCurve = null; return; }
   camPosCurve = new THREE.CatmullRomCurve3(CAMKEYS.map((k) => new THREE.Vector3(...k.pos)));
   camTgtCurve = new THREE.CatmullRomCurve3(CAMKEYS.map((k) => new THREE.Vector3(...k.tgt)));
@@ -5163,7 +5209,7 @@ function removeCamKeyAtPlayhead() {
    existing slider, unchanged meaning) now applies PER SEGMENT rather than
    globally: it eases the LOCAL fraction within whichever pair of keys
    `playheadT` currently falls between, not the whole clip at once. Path
-   SHAPE (straight vs curved) is the separate `camSmooth` toggle — Catmull-Rom
+   SHAPE (straight, curved or orbit) is the separate `camShape` — Catmull-Rom
    with exactly 2 points is mathematically linear anyway, but an explicit
    linear branch for n<3 avoids relying on that degenerate case. */
 function sampleCam(playheadT) {
@@ -5179,12 +5225,17 @@ function sampleCam(playheadT) {
   if (camTiming === "flow") return sampleFlow(i, localRaw, span);
   const localU = b.curve ? bezier(b.curve, localRaw) : ease(localRaw, V.ease);   // b's arrival curve, else Auto
   const fov = a.fov + (b.fov - a.fov) * localU;
+  const lerp3 = (p, q, u) => [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u, p[2] + (q[2] - p[2]) * u];
 
-  if (camSmooth && n >= 3 && camPosCurve) {
+  if (camShape === "orbit") {
+    const tgt = n >= 3 && camTgtCurve ? camTgtCurve.getPoint((i + localU) / (n - 1)).toArray() : lerp3(a.tgt, b.tgt, localU);
+    const S = camSphFor(), at = (v) => v[i] + (v[i + 1] - v[i]) * localU;
+    return { pos: sphToPos(tgt, at(S.az), at(S.el), at(S.lr)), tgt, fov };
+  }
+  if (camShape === "smooth" && n >= 3 && camPosCurve) {
     const curveU = (i + localU) / (n - 1);   // THREE parametrises curves uniformly by point INDEX, not by our `t`
     return { pos: camPosCurve.getPoint(curveU).toArray(), tgt: camTgtCurve.getPoint(curveU).toArray(), fov };
   }
-  const lerp3 = (p, q, u) => [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u, p[2] + (q[2] - p[2]) * u];
   return { pos: lerp3(a.pos, b.pos, localU), tgt: lerp3(a.tgt, b.tgt, localU), fov };
 }
 
@@ -5199,7 +5250,7 @@ function sampleCam(playheadT) {
 function sampleFlow(i, localRaw, h) {
   const a = CAMKEYS[i], b = CAMKEYS[i + 1];
   const u = b.curve ? bezier(b.curve, localRaw) : localRaw;
-  if (!camSmooth) {
+  if (camShape === "linear") {
     const lerp3 = (p, q) => [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u, p[2] + (q[2] - p[2]) * u];
     return { pos: lerp3(a.pos, b.pos), tgt: lerp3(a.tgt, b.tgt), fov: a.fov + (b.fov - a.fov) * u };
   }
@@ -5230,11 +5281,14 @@ function sampleFlow(i, localRaw, h) {
     return Math.max(-lim, Math.min(lim, v));
   };
   const h3 = (p, q, m0, m1) => [0, 1, 2].map((j) => hermite(p[j], q[j], m0[j], m1[j], h, u));
-  return {
-    pos: h3(a.pos, b.pos, scale3(T.pos[i], s0, a.pos, b.pos), scale3(T.pos[i + 1], s1, a.pos, b.pos)),
-    tgt: h3(a.tgt, b.tgt, scale3(T.tgt[i], s0, a.tgt, b.tgt), scale3(T.tgt[i + 1], s1, a.tgt, b.tgt)),
-    fov: hermite(a.fov, b.fov, scale1(T.fov[i], s0, a.fov, b.fov), scale1(T.fov[i + 1], s1, a.fov, b.fov), h, u),
-  };
+  const h1 = (v, m) => hermite(v[i], v[i + 1], scale1(m[i], s0, v[i], v[i + 1]), scale1(m[i + 1], s1, v[i], v[i + 1]), h, u);
+  const tgt = h3(a.tgt, b.tgt, scale3(T.tgt[i], s0, a.tgt, b.tgt), scale3(T.tgt[i + 1], s1, a.tgt, b.tgt));
+  const fov = hermite(a.fov, b.fov, scale1(T.fov[i], s0, a.fov, b.fov), scale1(T.fov[i + 1], s1, a.fov, b.fov), h, u);
+  if (camShape === "orbit") {
+    const S = camSphFor();
+    return { pos: sphToPos(tgt, h1(S.az, S.maz), h1(S.el, S.mel), h1(S.lr, S.mlr)), tgt, fov };
+  }
+  return { pos: h3(a.pos, b.pos, scale3(T.pos[i], s0, a.pos, b.pos), scale3(T.pos[i + 1], s1, a.pos, b.pos)), tgt, fov };
 }
 
 /* Slope du/dx of an arrival curve at its start (end = 0) or finish (end = 1),
@@ -6892,24 +6946,25 @@ function refreshCamUI() {
 }
 $("camAddKey").onclick = addCamKey;
 $("camRemoveKey").onclick = removeCamKeyAtPlayhead;
-/* Shape and timing buttons from state. Every place that sets camSmooth or
+/* Shape and timing buttons from state. Every place that sets camShape or
    camTiming (the buttons, a new capture, preset load) ends here, so a label
    can't disagree with what the sampler does. */
 function refreshPathUI() {
-  $("camSmooth").textContent = camSmooth ? "Smooth" : "Linear";
-  $("camSmooth").classList.toggle("on", camSmooth);
+  for (const b of document.querySelectorAll("#camShapeBtns button")) b.classList.toggle("on", b.dataset.shape === camShape);
   for (const b of document.querySelectorAll("#camTimingBtns button")) b.classList.toggle("on", b.dataset.timing === camTiming);
   $("camEaseRow").classList.toggle("flowdim", camTiming === "flow");
   $("camEaseHint").classList.toggle("show", camTiming === "flow");
   camArrSig = "";             // Auto draws differently in Flow
   refreshArrival();
 }
-$("camSmooth").onclick = () => {
-  camSmooth = !camSmooth;
-  refreshPathUI();
-  driveCamera();
-  pushUniforms();
-};
+for (const b of document.querySelectorAll("#camShapeBtns button")) {
+  b.onclick = () => {
+    camShape = b.dataset.shape;
+    refreshPathUI();
+    driveCamera();
+    pushUniforms();
+  };
+}
 for (const b of document.querySelectorAll("#camTimingBtns button")) {
   b.onclick = () => {
     camTiming = b.dataset.timing;
@@ -7268,7 +7323,8 @@ function serialize() {
     output: { res: $("res").value, fps: $("fps").value },   // kept for v1 readers
     camera: {
       keys: CAMKEYS.map((k) => ({ t: +k.t.toFixed(6), pos: k.pos, tgt: k.tgt, fov: k.fov, ...(k.curve ? { curve: k.curve } : {}) })),   // curve only when shaped
-      smooth: camSmooth,
+      shape: camShape,
+      smooth: camShape !== "linear",            // for builds before Orbit, which read only this
       timing: camTiming,
       mode: camMode,
     },
@@ -7549,7 +7605,8 @@ function applyPreset(o) {
         curve: cleanCurve(k.curve),     // v11; absent, malformed or pre-v11 -> null (Auto)
       }))
       .sort((a, b) => a.t - b.t);
-    camSmooth = o.camera.smooth !== false;
+    camShape = ["linear", "smooth", "orbit"].includes(o.camera.shape) ? o.camera.shape
+      : o.camera.smooth !== false ? "smooth" : "linear";        // absent (pre-Orbit) = from `smooth`
     camTiming = o.camera.timing === "flow" ? "flow" : "ease";   // absent (pre-Flow) = ease
   } else if (o.camera?.A || o.camera?.B) {
     CAMKEYS = [];
@@ -7559,12 +7616,12 @@ function applyPreset(o) {
     if (isVec3(o.camera.B?.pos) && isVec3(o.camera.B?.tgt)) {
       CAMKEYS.push({ t: 1, pos: o.camera.B.pos.map(Number), tgt: o.camera.B.tgt.map(Number), fov: 50 });
     }
-    camSmooth = true;
+    camShape = "smooth";
     camTiming = "ease";
     if (CAMKEYS.length) applyPreset.migrationNotes.push(`camera A/B -> ${CAMKEYS.length} keyframe${CAMKEYS.length === 1 ? "" : "s"}`);
   } else {
     CAMKEYS = [];
-    camSmooth = true;
+    camShape = "smooth";
     camTiming = "ease";
   }
   rebuildCamCurves();
@@ -8580,14 +8637,14 @@ if (DEBUG) {
      every one of them back afterwards, whatever fn does. sampleCam reads
      globals by design (it is the app's real sampler), so this swap is how
      the harness exercises it without touching its code path. */
-  const camWith = (keys, { smooth = true, ease: easeK = 0.8, timing = "ease" } = {}, fn) => {
-    const saved = { keys: CAMKEYS, smooth: camSmooth, ease: V.ease, timing: camTiming };
+  const camWith = (keys, { smooth = true, shape = smooth ? "smooth" : "linear", ease: easeK = 0.8, timing = "ease" } = {}, fn) => {
+    const saved = { keys: CAMKEYS, shape: camShape, ease: V.ease, timing: camTiming };
     try {
-      CAMKEYS = keys; camSmooth = smooth; V.ease = easeK; camTiming = timing;
+      CAMKEYS = keys; camShape = shape; V.ease = easeK; camTiming = timing;
       rebuildCamCurves();
       return fn();
     } finally {
-      CAMKEYS = saved.keys; camSmooth = saved.smooth; V.ease = saved.ease; camTiming = saved.timing;
+      CAMKEYS = saved.keys; camShape = saved.shape; V.ease = saved.ease; camTiming = saved.timing;
       rebuildCamCurves();
     }
   };
@@ -8674,9 +8731,71 @@ if (DEBUG) {
     return out;
   };
 
+  /* Gate 4, Orbit shape: (a) on the circle, distance to the target within
+     1% of the keys' distance throughout, in both timings; (b) a 350° -> 10°
+     pair turns 20° the short way; (c) Flow: az velocity continuous through
+     the uneven fixture's interior keys, as Gate 2(a), and (d) no overshoot:
+     az, el and log R stay between each segment's end keys. */
+  const camGate4 = () => {
+    const fx = camFixtures(), dt = 1e-6, out = {};
+    const sph = (s) => {
+      const d = [0, 1, 2].map((j) => s.pos[j] - s.tgt[j]), R = Math.hypot(...d);
+      return { az: Math.atan2(d[0], d[2]), el: Math.asin(d[1] / R), lr: Math.log(R) };
+    };
+    const wrap = (x) => x - 2 * Math.PI * Math.round(x / (2 * Math.PI));
+    let worstRad = 0;
+    for (const timing of ["ease", "flow"]) {
+      camWith(fx.circle, { shape: "orbit", timing }, () => {
+        const tg = fx.circle[0].tgt, d = (p) => Math.hypot(p[0] - tg[0], p[1] - tg[1], p[2] - tg[2]);
+        const keyD = d(fx.circle[0].pos);
+        for (const t of camSampleTs(fx.circle)) worstRad = Math.max(worstRad, Math.abs(d(sampleCam(t).pos) / keyD - 1));
+      });
+    }
+    out.a = { pass: worstRad <= 0.01, worstRel: worstRad };
+    const deg = (a, r = 4) => [Math.sin(a * Math.PI / 180) * r, 0.5, Math.cos(a * Math.PI / 180) * r];
+    const wrapPair = [{ t: 0, pos: deg(350), tgt: [0, 0, 0], fov: 50 }, { t: 1, pos: deg(10), tgt: [0, 0, 0], fov: 50 }];
+    for (const timing of ["ease", "flow"]) {
+      camWith(wrapPair, { shape: "orbit", timing }, () => {
+        let swept = 0, prev = sph(sampleCam(0)).az;
+        for (let s = 1; s <= 400; s++) { const az = sph(sampleCam(s / 400)).az; swept += Math.abs(wrap(az - prev)); prev = az; }
+        out[timing === "ease" ? "b" : "bFlow"] = { pass: Math.abs(swept * 180 / Math.PI - 20) < 0.01, sweptDeg: swept * 180 / Math.PI };
+      });
+    }
+    camWith(fx.uneven, { shape: "orbit", timing: "flow" }, () => {
+      const azAt = (t) => sph(sampleCam(t)).az;
+      const keyVel = [];
+      let worstRel = 0;
+      for (let i = 1; i < fx.uneven.length - 1; i++) {
+        const t = fx.uneven[i].t, a0 = azAt(t);
+        const vL = wrap(a0 - azAt(t - dt)) / dt, vR = wrap(azAt(t + dt) - a0) / dt;
+        const mag = Math.max(Math.abs(vL), Math.abs(vR)), gap = Math.abs(vL - vR);
+        const ok = gap <= 0.02 * mag || gap <= 1e-4;
+        if (mag > 0) worstRel = Math.max(worstRel, gap / mag);
+        keyVel.push({ t, azVelL: +vL.toFixed(4), azVelR: +vR.toFixed(4), ok });
+      }
+      out.c = { pass: keyVel.every((k) => k.ok), worstRel, keyVel };
+      const S = sphKeys(fx.uneven), ts = camSampleTs(fx.uneven);
+      let over = 0;
+      for (let i = 0; i < fx.uneven.length - 1; i++) {
+        const t0 = fx.uneven[i].t, t1 = fx.uneven[i + 1].t;
+        for (const t of ts.filter((t) => t >= t0 && t <= t1)) {
+          const p = sph(sampleCam(t));
+          const azU = S.az[i] + wrap(p.az - S.az[i]);
+          for (const [v, ch] of [[azU, "az"], [p.el, "el"], [p.lr, "lr"]]) {
+            const lo = Math.min(S[ch][i], S[ch][i + 1]), hi = Math.max(S[ch][i], S[ch][i + 1]);
+            over = Math.max(over, lo - v, v - hi);
+          }
+        }
+      }
+      out.d = { pass: over <= 1e-9, worstOvershoot: over };
+    });
+    out.pass = out.a.pass && out.b.pass && out.bFlow.pass && out.c.pass && out.d.pass;
+    return out;
+  };
+
   window.__bench = {
     renderer, scene, camera, controls, spark,
-    camCheck, camGate2, sampleCamLegacy, camFixtures, camWith, camSampleTs, camDiff,
+    camCheck, camGate2, camGate4, sampleCamLegacy, camFixtures, camWith, camSampleTs, camDiff,
     get mesh() { return mesh; },
     get V()    { return V; },
     get P()    { return P; },
@@ -8713,7 +8832,7 @@ if (DEBUG) {
     get radius(){ return radius; },
     get bounds(){ return bounds; },
     get CAMKEYS(){ return CAMKEYS; },
-    get camSmooth(){ return camSmooth; },
+    get camShape(){ return camShape; },
     get camTiming(){ return camTiming; },
     get camFlow(){ return camFlow; },
     get camSnap(){ return camSnap; },

@@ -99,7 +99,9 @@ hand.
   was doing at any timeline position. Any parameter can be routed to a
   band with its own attack/release/gain shaping.
 - **Camera**: manual orbit, a keyframed path, or a generated turntable
-  orbit. The keyframed path is Catmull-Rom between camera poses, eased per
+  orbit. The keyframed path is Catmull-Rom between camera poses (or, in the
+  "Orbit" shape, the camera's offset from the target interpolated as
+  azimuth, elevation and log distance, with monotone tangents in Flow), eased per
   segment ("Ease" timing), or one cubic Hermite per segment with
   time-scaled, chord-capped tangents so speed carries through keys ("Flow").
   Each key can carry a cubic-Bézier arrival curve that retimes the segment

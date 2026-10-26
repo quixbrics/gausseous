@@ -194,7 +194,10 @@ curve. Exports honour envelopes.
 ticks above the lane: **Add key** stores the current view at the playhead, and
 ticks drag to retime. Between keys:
 
-- **Smooth / Linear** sets the path shape.
+- **Linear / Smooth / Orbit** sets the path shape. *Orbit* swings around
+  the target instead of cutting across, so the distance to it eases from
+  key to key rather than dipping between them. It turns the short way
+  round; to go the long way, add a key in between.
 - **Ease / Flow** sets the timing. *Ease* settles at every key, by the
   **Ease** slider. *Flow* keeps the camera's speed through keys, so a
   multi-key move plays as one glide.
