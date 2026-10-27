@@ -216,8 +216,10 @@ ticks drag to retime. Between keys:
 **Save JSON** writes the whole editable state — parameters, envelopes, toggles,
 camera keys, gesture bindings, audio mappings, timeline length — as a small
 text file. The splat and the audio are referenced by name only, not embedded,
-so load your capture first and then the preset. Drop a `.json` on the viewport
-to load it. Preset format v11; older presets still load, with any features they predate (Points, Lights, Mesh, Fracture, CRT, background hue, camera arrival curves and Flow timing) reset.
+so load the capture as well as the preset, in either order. A preset loaded
+before any capture holds its transform and camera keys for the next splat you
+load; loading a different splat over one already in the scene clears them.
+Drop a `.json` on the viewport to load it. Preset format v11; older presets still load, with any features they predate (Points, Lights, Mesh, Fracture, CRT, background hue, camera arrival curves and Flow timing) reset.
 
 Keep the tab visible while exporting — Chrome throttles background timers to
 ~1s, which slows the render to roughly a frame per second.

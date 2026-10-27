@@ -1514,6 +1514,7 @@ const MAX_REGIONS = 6;
 
 let mesh = null;
 let assetLabel = null;                // provenance for saved presets
+let presetPending = false;            // a preset was loaded with no capture in the scene: its transform and camera keys are for the NEXT capture
 let playhead = 0;                     // normalised timeline position, 0..1
 let radius = 1;                       // scene bounding-sphere radius
 let dpr = 1;
@@ -4887,28 +4888,38 @@ async function loadSplat(source, label) {
        transform — including the default correction below — is applied.
        Each new capture gets its own default correction rather than
        inheriting whatever the previous one needed. */
+    /* ...except when a preset was loaded before any capture: then its
+       transform and camera keys were saved against the capture arriving
+       now, and the user is loading them in the order "preset, then splat".
+       Resetting here silently dropped the keys in that order. */
+    const keepPreset = presetPending;
+    presetPending = false;
     captureObjectBasis();
-    xform = { ...XFORM_DEFAULT };
+    if (!keepPreset) xform = { ...XFORM_DEFAULT };
     applyXform();
     refreshModelUI();
     reframe();
 
     /* Camera keyframes are captured positions in THIS capture's world space
        — meaningless, possibly wildly out of frame, against a different one.
-       Same reasoning as the transform reset just above. */
-    CAMKEYS = [];
-    camShape = "smooth";
-    camTiming = "ease";
+       Same reasoning as the transform reset just above, and the same
+       exception. */
+    if (!keepPreset) {
+      CAMKEYS = [];
+      camShape = "smooth";
+      camTiming = "ease";
+    }
     rebuildCamCurves();
     refreshPathUI();
     refreshCamUI();
+    if (keepPreset) driveCamera();    // reframe() just moved the camera; put it back on the keys
 
     const n = splatCount(mesh).toLocaleString();
     nrmLoadedAt = performance.now();
     $("t-splats").textContent = n;
     $("t-state").textContent = "idle";
     assetLabel = label;
-    setStatus(`${label} — ${n} gaussians.`);
+    setStatus(`${label} — ${n} gaussians.${keepPreset && CAMKEYS.length ? ` Kept the preset's transform and ${CAMKEYS.length} camera key${CAMKEYS.length === 1 ? "" : "s"}.` : ""}`);
     showStartCard();
   } catch (err) {
     endParsePhase();
@@ -7649,6 +7660,7 @@ function applyPreset(o) {
      exactly. A preset WITH one is clamped field-by-field against its own
      slider's range, same as every other preset value. */
   const t = o.transform;
+  presetPending = !mesh;
   xform = t && typeof t === "object"
     ? {
         rotX: clamp(Number(t.rotX) || 0, -180, 180),
@@ -8553,7 +8565,7 @@ $("savePreset").onclick = () => {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
   const n = Object.values(ENV).filter((e) => e.keys.length).length;
-  setStatus(`Preset saved — ${n} envelope${n === 1 ? "" : "s"}.`);
+  setStatus(`Preset saved — ${n} envelope${n === 1 ? "" : "s"}, ${CAMKEYS.length} camera key${CAMKEYS.length === 1 ? "" : "s"}.`);
 };
 
 $("loadPreset").onclick = () => $("presetFile").click();
@@ -8564,7 +8576,8 @@ async function readPreset(file) {
     const n = Object.values(ENV).filter((e) => e.keys.length).length;
     const mig = applyPreset.migrationNotes;
     const migTxt = mig?.length ? ` Migrated: ${mig.join("; ")}.` : "";
-    setStatus(`Preset loaded — ${n} envelope${n === 1 ? "" : "s"}.${migTxt}`);
+    const forNext = presetPending && CAMKEYS.length ? " They apply to the next splat you load." : "";
+    setStatus(`Preset loaded — ${n} envelope${n === 1 ? "" : "s"}, ${CAMKEYS.length} camera key${CAMKEYS.length === 1 ? "" : "s"}.${forNext}${migTxt}`);
   } catch (err) {
     setStatus(`Preset load failed: ${err.message}`, true);
   }
