@@ -1124,7 +1124,7 @@
     <div class="row" title="Depth of field, 0 = maximum blur, 100 = none. Deliberately not an f-number: Spark's apertureAngle is not calibrated to a physical aperture, so a real-lens label would be photographically meaningless."><label>Depth of field</label><output id="o-dof">—</output>
       <input type="range" id="p-dof" min="0" max="100" step="0.5" value="100"></div>
     <div class="row" title="Focus offset in stops (doublings) from the focus source above. 0 focuses exactly on it, +1 twice as far, -1 half as far. Scale-free, so the same slider position means the same thing on a tabletop scan and on a building."><label>Focus (stops)</label><output id="o-dofStops">—</output>
-      <input type="range" id="p-dofStops" min="-5" max="5" step="0.05" value="0"></div>
+      <input type="range" id="p-dofStops" min="-10" max="5" step="0.05" value="0"></div>
     <div class="row" title="Multiplies blur on the camera side of the focal surface only. Deliberately non-physical: blur scales with the absolute depth error, and between the camera and the focal surface there is only F of depth to be wrong by, where behind it there is unlimited depth — so the far side goes fully soft and the near side cannot. 1 is off."><label>Near blur boost</label><output id="o-nearBoost">—</output>
       <input type="range" id="p-nearBoost" min="1" max="8" step="0.05" value="1"></div>
     <p style="color:var(--ink-dim); margin:8px 0 0">
