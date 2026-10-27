@@ -36,6 +36,7 @@ python3 -c "import http.server; H=http.server.SimpleHTTPRequestHandler; _e=H.end
 ## First session
 
 1. Load a splat (drop it on the viewport, **Choose file**, or **Load test asset**).
+   To swap it later, use **Load splat…** in Scene → Splat, or drop another file.
 2. A **Next** card offers audio (**Test audio** loads `bandtest.wav`). Loading
    audio sets the timeline to the track's length and loops it.
 3. Press **Play**. To make more things move with the sound, arm a band under
@@ -54,7 +55,7 @@ Dismiss the card with ×; the same things live in the transport bar.
 
 | Tab | Sections |
 |---|---|
-| **Scene** | Camera · Transform · Opacity · Masks |
+| **Scene** | Splat · Camera · Transform · Opacity · Masks |
 | **Look** | Background · Points · Lights · Colour · Depth · Optics · Film · Frame · Grain |
 | **Motion** | Noise · Fracture · Quantise · Wave · Smear |
 | **Audio** | Meters · Mappings |

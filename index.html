@@ -759,12 +759,22 @@
        loadBarShow()/startParsePhase(). Hidden outside a load. -->
   <div id="loadBar" class="hide"><i></i></div>
   <nav id="tabs" role="tablist" aria-label="Control groups">
-    <button type="button" role="tab" data-tab="scene" title="Camera, transform, opacity cull, masks">Scene<i class="tflag"></i></button>
+    <button type="button" role="tab" data-tab="scene" title="Splat file, camera, transform, opacity cull, masks">Scene<i class="tflag"></i></button>
     <button type="button" role="tab" data-tab="look" title="Points, lights, colour, depth, optics, film, frame, grain">Look<i class="tflag"></i></button>
     <button type="button" role="tab" data-tab="motion" title="Noise, quantise, wave, smear">Motion<i class="tflag"></i></button>
     <button type="button" role="tab" data-tab="audio" title="Audio analysis and every band-to-parameter mapping">Audio<i class="tflag"></i></button>
     <button type="button" role="tab" data-tab="export" title="Render settings, presets, viewport">Export<i class="tflag"></i></button>
   </nav>
+
+  <details class="mod" data-group="splat" data-tab="scene" open>
+    <summary>Splat <em>file</em><i class="gflag"></i></summary>
+    <div class="btns" style="margin-bottom:9px"><button id="reload">Load splat…</button></div>
+    <label class="check"><input type="checkbox" id="useLod"> Level of detail on next load (large scans)</label>
+    <p style="color:var(--ink-dim); margin:8px 0 0">
+      .ply, .spz, .splat, .ksplat, .sog, .zip or .rad. Or drop the file on the viewport.
+      A new splat clears the transform and camera keys, which belong to the old capture.
+    </p>
+  </details>
 
   <details class="mod" data-group="camera" data-tab="scene" open>
     <summary>Camera <em>move</em><i class="gflag"></i></summary>
@@ -1426,9 +1436,8 @@
     <p style="color:var(--ink-dim); margin:0 0 9px">Background colour is in the Look tab.</p>
     <div class="row"><label>Pixel ratio</label><output id="o-dpr">—</output>
       <input type="range" id="p-dpr" min="0.5" max="2" step="0.05" value="1"></div>
-    <label class="check"><input type="checkbox" id="useLod"> Level of detail on next load (large scans)</label>
     <label class="check"><input type="checkbox" id="mobileMode"> Mobile profile (caps pixel ratio, forces LOD)</label>
-    <div class="btns"><button id="reframe">Reframe</button><button id="reload">Load another</button></div>
+    <div class="btns"><button id="reframe">Reframe</button></div>
   </details>
 
 </aside>
